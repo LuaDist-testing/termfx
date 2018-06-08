@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+#include <wchar.h>
 
 #include "termbox.h"
 
@@ -132,11 +133,17 @@ int tb_init(void)
 
 void tb_shutdown(void)
 {
+	if (termw == -1) {
+		fputs("tb_shutdown() should not be called twice.", stderr);
+		abort();
+	}
+
 	bytebuffer_puts(&output_buffer, funcs[T_SHOW_CURSOR]);
 	bytebuffer_puts(&output_buffer, funcs[T_SGR0]);
 	bytebuffer_puts(&output_buffer, funcs[T_CLEAR_SCREEN]);
 	bytebuffer_puts(&output_buffer, funcs[T_EXIT_CA]);
 	bytebuffer_puts(&output_buffer, funcs[T_EXIT_KEYPAD]);
+	bytebuffer_puts(&output_buffer, funcs[T_EXIT_MOUSE]);
 	bytebuffer_flush(&output_buffer, inout);
 	tcsetattr(inout, TCSAFLUSH, &orig_tios);
 
@@ -154,7 +161,7 @@ void tb_shutdown(void)
 
 void tb_present(void)
 {
-	int x,y;
+	int x,y,w,i;
 	struct tb_cell *back, *front;
 
 	/* invalidate cursor position */
@@ -167,14 +174,32 @@ void tb_present(void)
 	}
 
 	for (y = 0; y < front_buffer.height; ++y) {
-		for (x = 0; x < front_buffer.width; ++x) {
+		for (x = 0; x < front_buffer.width; ) {
 			back = &CELL(&back_buffer, x, y);
 			front = &CELL(&front_buffer, x, y);
-			if (memcmp(back, front, sizeof(struct tb_cell)) == 0)
+			w = wcwidth(back->ch);
+			if (w < 1) w = 1;
+			if (memcmp(back, front, sizeof(struct tb_cell)) == 0) {
+				x += w;
 				continue;
-			send_attr(back->fg, back->bg);
-			send_char(x, y, back->ch);
+			}
 			memcpy(front, back, sizeof(struct tb_cell));
+			send_attr(back->fg, back->bg);
+			if (w > 1 && x >= front_buffer.width - (w - 1)) {
+				// Not enough room for wide ch, so send spaces
+				for (i = x; i < front_buffer.width; ++i) {
+					send_char(i, y, ' ');
+				}
+			} else {
+				send_char(x, y, back->ch);
+				for (i = 1; i < w; ++i) {
+					front = &CELL(&front_buffer, x + i, y);
+					front->ch = 0;
+					front->fg = back->fg;
+					front->bg = back->bg;
+				}
+			}
+			x += w;
 		}
 	}
 	if (!IS_CURSOR_HIDDEN(cursor_x, cursor_y))
@@ -245,6 +270,10 @@ void tb_blit(int x, int y, int w, int h, const struct tb_cell *cells)
 	}
 }
 
+struct tb_cell *tb_cell_buffer()
+{
+	return back_buffer.cells;
+}
 
 int tb_poll_event(struct tb_event *event)
 {
@@ -280,8 +309,16 @@ void tb_clear(void)
 
 int tb_select_input_mode(int mode)
 {
-	if (mode)
+	if (mode) {
 		inputmode = mode;
+		if (mode&TB_INPUT_MOUSE) {
+			bytebuffer_puts(&output_buffer, funcs[T_ENTER_MOUSE]);
+			bytebuffer_flush(&output_buffer, inout);
+		} else {
+			bytebuffer_puts(&output_buffer, funcs[T_EXIT_MOUSE]);
+			bytebuffer_flush(&output_buffer, inout);
+		}
+	}
 	return inputmode;
 }
 
@@ -458,15 +495,15 @@ static void send_attr(uint16_t fg, uint16_t bg)
 			break;
 
 		case TB_OUTPUT_216:
-			fgcol = fg & 0xFF; if(fgcol > 215) fgcol = 7;
-			bgcol = bg & 0xFF; if(bgcol > 215) bgcol = 0;
+			fgcol = fg & 0xFF; if (fgcol > 215) fgcol = 7;
+			bgcol = bg & 0xFF; if (bgcol > 215) bgcol = 0;
 			fgcol += 0x10;
 			bgcol += 0x10;
 			break;
 
 		case TB_OUTPUT_GRAYSCALE:
-			fgcol = fg & 0xFF; if(fgcol > 23) fg = 23;
-			bgcol = bg & 0xFF; if(bgcol > 23) bg = 0;
+			fgcol = fg & 0xFF; if (fgcol > 23) fgcol = 23;
+			bgcol = bg & 0xFF; if (bgcol > 23) bgcol = 0;
 			fgcol += 0xe8;
 			bgcol += 0xe8;
 			break;
@@ -555,6 +592,39 @@ static void update_size(void)
 	send_clear();
 }
 
+static int read_up_to(int n) {
+	assert(n > 0);
+	const int prevlen = input_buffer.len;
+	bytebuffer_resize(&input_buffer, prevlen + n);
+
+	int read_n = 0;
+	while (read_n <= n) {
+		ssize_t r = 0;
+		if (read_n < n) {
+			r = read(inout, input_buffer.buf + prevlen + read_n, n - read_n);
+		}
+#ifdef __CYGWIN__
+		// While linux man for tty says when VMIN == 0 && VTIME == 0, read
+		// should return 0 when there is nothing to read, cygwin's read returns
+		// -1. Not sure why and if it's correct to ignore it, but let's pretend
+		// it's zero.
+		if (r < 0) r = 0;
+#endif
+		if (r < 0) {
+			// EAGAIN / EWOULDBLOCK shouldn't occur here
+			assert(errno != EAGAIN && errno != EWOULDBLOCK);
+			return -1;
+		} else if (r > 0) {
+			read_n += r;
+		} else {
+			bytebuffer_resize(&input_buffer, prevlen + read_n);
+			return read_n;
+		}
+	}
+	assert(!"unreachable");
+	return 0;
+}
+
 static int wait_fill_event(struct tb_event *event, struct timeval *timeout)
 {
 	// ;-)
@@ -565,27 +635,17 @@ static int wait_fill_event(struct tb_event *event, struct timeval *timeout)
 	// try to extract event from input buffer, return on success
 	event->type = TB_EVENT_KEY;
 	if (extract_event(event, &input_buffer, inputmode))
-		return TB_EVENT_KEY;
+		return event->type;
 
 	// it looks like input buffer is incomplete, let's try the short path,
 	// but first make sure there is enough space
-	int prevlen = input_buffer.len;
-	bytebuffer_resize(&input_buffer, prevlen + ENOUGH_DATA_FOR_PARSING);
-	ssize_t r = read(inout,	input_buffer.buf + prevlen,
-		ENOUGH_DATA_FOR_PARSING);
-	if (r < 0) {
-		// EAGAIN / EWOULDBLOCK shouldn't occur here
-		assert(errno != EAGAIN && errno != EWOULDBLOCK);
+	int n = read_up_to(ENOUGH_DATA_FOR_PARSING);
+	if (n < 0)
 		return -1;
-	} else if (r > 0) {
-		bytebuffer_resize(&input_buffer, prevlen + r);
-		if (extract_event(event, &input_buffer, inputmode))
-			return TB_EVENT_KEY;
-	} else {
-		bytebuffer_resize(&input_buffer, prevlen);
-	}
+	if (n > 0 && extract_event(event, &input_buffer, inputmode))
+		return event->type;
 
-	// r == 0, or not enough data, let's go to select
+	// n == 0, or not enough data, let's go to select
 	while (1) {
 		FD_ZERO(&events);
 		FD_SET(inout, &events);
@@ -597,21 +657,15 @@ static int wait_fill_event(struct tb_event *event, struct timeval *timeout)
 
 		if (FD_ISSET(inout, &events)) {
 			event->type = TB_EVENT_KEY;
-			prevlen = input_buffer.len;
-			bytebuffer_resize(&input_buffer,
-				prevlen + ENOUGH_DATA_FOR_PARSING);
-			r = read(inout, input_buffer.buf + prevlen,
-				ENOUGH_DATA_FOR_PARSING);
-			if (r < 0) {
-				// EAGAIN / EWOULDBLOCK shouldn't occur here
-				assert(errno != EAGAIN && errno != EWOULDBLOCK);
+			n = read_up_to(ENOUGH_DATA_FOR_PARSING);
+			if (n < 0)
 				return -1;
-			}
-			bytebuffer_resize(&input_buffer, prevlen + r);
-			if (r == 0)
+
+			if (n == 0)
 				continue;
+
 			if (extract_event(event, &input_buffer, inputmode))
-				return TB_EVENT_KEY;
+				return event->type;
 		}
 		if (FD_ISSET(winch_fds[0], &events)) {
 			event->type = TB_EVENT_RESIZE;

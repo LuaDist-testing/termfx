@@ -1,6 +1,6 @@
 -- sample for termfx
--- Gunnar Zötl <gz@tset.de>, 2014
--- Released under MIT/X11 license. See file LICENSE for details.
+-- Gunnar Zötl <gz@tset.de>, 2014-2015
+-- Released under the terms of the MIT license. See file LICENSE for details.
 
 package.path = "samples/?.lua;"..package.path
 

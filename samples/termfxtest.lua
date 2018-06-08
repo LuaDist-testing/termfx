@@ -1,15 +1,42 @@
 -- sample for termfx
--- Gunnar Zötl <gz@tset.de>, 2014
--- Released under MIT/X11 license. See file LICENSE for details.
+-- Gunnar Zötl <gz@tset.de>, 2014-2015
+-- Released under the terms of the MIT license. See file LICENSE for details.
 
 package.path = "samples/?.lua;"..package.path
 
 tfx = require "termfx"
 ui = require "simpleui"
+screenshot = require "screenshot"
+
 
 tfx.init()
-tfx.inputmode(tfx.input.ALT)
+tfx.inputmode(tfx.input.ALT + tfx.input.MOUSE)
 tfx.outputmode(tfx.output.COL256)
+
+rev_keys = {}
+for k, v in pairs(tfx.key) do
+	if rev_keys[v] then
+		rev_keys[v] = rev_keys[v] .. ','..k
+	else
+		rev_keys[v] = k
+	end
+end
+
+function find_name(tbl, val)
+	for k, v in pairs(tbl) do
+		if val == v then return k end
+	end
+	return nil
+end
+
+function tbl_keys(tbl)
+	local res = {}
+	for k, v in pairs(tbl) do
+		res[#res+1] = k
+	end
+	table.sort(res, function(i, k) return tbl[i] < tbl[k] end)
+	return res
+end
 
 function pr_event(x, y, evt)
 	evt = evt or {}
@@ -29,7 +56,7 @@ function pr_event(x, y, evt)
 		tfx.printat(x, y+2, "mod")
 		tfx.printat(x+8, y+2, evt.mod)
 		tfx.printat(x, y+3, "key")
-		tfx.printat(x+8, y+3, evt.key)
+		tfx.printat(x+8, y+3, rev_keys[evt.key] or evt.key)
 		tfx.printat(x, y+4, "ch")
 		tfx.printat(x+8, y+4, evt.ch)
 		tfx.printat(x, y+5, "char")
@@ -39,6 +66,13 @@ function pr_event(x, y, evt)
 		tfx.printat(x+8, y+2, evt.w)
 		tfx.printat(x, y+3, "h")
 		tfx.printat(x+8, y+3, evt.h)
+	elseif evt.type == "mouse" then
+		tfx.printat(x, y+2, "x")
+		tfx.printat(x+8, y+2, evt.x)
+		tfx.printat(x, y+3, "y")
+		tfx.printat(x+8, y+3, evt.y)
+		tfx.printat(x, y+4, "key")
+		tfx.printat(x+8, y+4, rev_keys[evt.key] or evt.key)
 	end
 end
 
@@ -59,22 +93,6 @@ function pr_colors(x, y, w)
 	tfx.printat(x, y+6, "CYAN", w)
 	tfx.attributes(tfx.color.BLACK, tfx.color.WHITE)
 	tfx.printat(x, y+7, "WHITE", w)
-end
-
-function find_name(tbl, val)
-	for k, v in pairs(tbl) do
-		if val == v then return k end
-	end
-	return nil
-end
-
-function tbl_keys(tbl)
-	local res = {}
-	for k, v in pairs(tbl) do
-		res[#res+1] = k
-	end
-	table.sort(res, function(i, k) return tbl[i] < tbl[k] end)
-	return res
 end
 
 function pr_stats(x, y)
@@ -192,7 +210,7 @@ ok, err = pcall(function()
 	repeat
 		
 		tfx.clear(tfx.color.WHITE, tfx.color.BLACK)
-		tfx.printat(1, tfx.height(), "press I to select input mode, O to select output mode, Q to quit")
+		tfx.printat(1, tfx.height(), "press I for input mode, O for output mode, S for screenshot, Q to quit")
 		
 		tfx.printat(1, 1, _VERSION)
 		pr_event(1, 3, evt)
@@ -208,10 +226,25 @@ ok, err = pcall(function()
 		tfx.attributes(tfx.color.WHITE, tfx.color.BLUE)
 		if evt.char == "q" or evt.char == "Q" then
 			quit = ui.ask("Really quit?")
+			evt = {}
 		elseif evt.char == "i" or evt.char == "I" then
 			select_inputmode()
+			evt = {}
 		elseif evt.char == "o" or evt.char == "O" then
 			select_outputmode()
+			evt = {}
+		elseif evt.char == "s" or evt.char == "S" then
+			local f = io.open("screenshot.html", "w")
+			if f then
+				f:write("<html><body>")
+				f:write(screenshot())
+				f:write("</body></html>")
+				f:close()
+				ui.message("Screenshot saved to screenshot.html")
+			else
+				ui.message("Could not save screenshot.")
+			end
+			evt = {}
 		end
 
 	until quit

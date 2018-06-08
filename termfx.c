@@ -2,8 +2,8 @@
  *
  * provide simple terminal interface for lua
  *
- * Gunnar Zötl <gz@tset.de>, 2014
- * Released under MIT/X11 license. See file LICENSE for details.
+ * Gunnar Zötl <gz@tset.de>, 2014-2015
+ * Released under the terms of the MIT license. See file LICENSE for details.
  */
 
 #include <stdint.h>
@@ -19,6 +19,7 @@
 #include "mini_utf8.h"
 
 #include "termbox.h"
+#include "tbutils.h"
 #include "termfx.h"
 
 /* userdata for a termbox cell */
@@ -554,6 +555,37 @@ static int tfx_bufSetcell(lua_State *L)
 	return 0;
 }
 
+/* tfx_bufGetCell
+ *
+ * gets data from a cell in a buffer.
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack:
+ *	1	TfxBuffer userdata
+ * 	2	x coordinate of cell
+ * 	3	y coordinate of cell
+ *
+ * Lua Returns:
+ *	a TfxCell with the data from the read cell
+ */
+int tfx_bufGetCell(lua_State *L)
+{
+	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
+	int x = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
+
+	if (x < 0 || x >= tfxbuf->w || y < 0 || y >= tfxbuf->h)	{
+		lua_pushnil(L);
+		return 1;
+	}
+	TfxCell *tfxcell = tfx_pushCell(L);
+	*tfxcell = CELL(tfxbuf->buf, tfxbuf->w, x, y);
+
+	return 1;
+}
+
 /* tfx_bufBlit
  *
  * blits the contents of a buffer to another buffer. Just a modified
@@ -578,40 +610,145 @@ static int tfx_bufBlit(lua_State *L)
 	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
 	TfxBuffer *other = tfx_checkBuffer(L, 4);
 
-	if (x + other->w < 0 || x >= tfxbuf->w)
-		return 0;
-	if (y + other->h < 0 || y >= tfxbuf->h)
-		return 0;
-	int xo = 0, yo = 0, ww = other->w, hh = other->h;
-	if (x < 0) {
-		xo = -x;
-		ww -= xo;
-		x = 0;
-	}
-	if (y < 0) {
-		yo = -y;
-		hh -= yo;
-		y = 0;
-	}
-	if (ww > tfxbuf->w - x)
-		ww = tfxbuf->w - x;
-	if (hh > tfxbuf->h - y)
-		hh = tfxbuf->h - y;
-
-	int sy;
-	struct tb_cell *dst = tfxbuf->buf + tfxbuf->w * y + x;
-	const struct tb_cell *src = other->buf + other->w * yo + xo;
-	size_t size = sizeof(struct tb_cell) * ww;
-
-	for (sy = 0; sy < hh; ++sy) {
-		memcpy(dst, src, size);
-		dst += tfxbuf->w;
-		src += other->w;
-	}
-	
+	tbu_blitbuffer(tfxbuf->buf, tfxbuf->w, tfxbuf->h, x, y, other->buf, other->w, other->h);
 	return 0;
 }
 
+/* tfx_bufRect
+ *
+ * draws a rectangle. Either uses the default values for foreground and
+ * background, or the values passed on the lua stack.
+ * 
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack:
+ *	1	TfxBuffer userdata
+ * 	2	x coordinate of rect
+ * 	3	y coordinate of rect
+ * 	4	width of rect
+ * 	5	height of rect
+ * either
+ * 	6	TfxCell
+ * or
+ * 	6	(opt) char, defaults to ' '
+ * 	7	(opt) foreground attributes, defaults to buffer default foreground
+ * 	8	(opt) background attributes, defaults to buffer default background
+ *
+ * Lua Returns:
+ *	false if the rectangle was entirely outside of the terminal, true if not
+ */
+static int tfx_bufRect(lua_State *L)
+{
+	TfxCell cel, *celp = &cel;
+	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
+	int x = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 4);
+	int h = (int) luaL_checkinteger(L, 5);
+	if (tfx_isCell(L, 6)) {
+		maxargs(L, 6);
+		celp = tfx_toCell(L, 6);
+	} else {
+		maxargs(L, 8);
+		cel.ch = _tfx_optchar(L, 6, 0);
+		cel.fg = (uint16_t) luaL_optinteger(L, 7, default_fg) & 0xFFFF;
+		cel.bg = (uint16_t) luaL_optinteger(L, 8, default_bg) & 0xFFFF;
+	}
+
+	tbu_fillbufferregion(tfxbuf->buf, tfxbuf->w, tfxbuf->h, x, y, w, h, celp);
+	return 0;
+}
+
+/* tfx_bufCopyRegion
+ * 
+ * copies a rectangular region of a buffer to another place
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack
+ *	1	TfxBuffer userdata
+ * 	2	target x coordinate for copy
+ * 	3	target y coordinate for copy
+ * 	4	source x coordinate
+ * 	5	source y coordinate
+ *	6	width of rectangle to copy
+ *	7	height of rectangle to copy
+ *
+ * Lua Returns:
+ *	-
+ */
+static int tfx_bufCopyRegion(lua_State *L)
+{
+	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
+	int tx = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int ty = (int) luaL_checkinteger(L, 3) - top_left_coord;
+	int x = (int) luaL_checkinteger(L, 4) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 5) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 6);
+	int h = (int) luaL_checkinteger(L, 7);
+
+	tbu_copybufferregion(tfxbuf->buf, tfxbuf->w, tfxbuf->h, tx, ty, x, y, w, h);
+	return 0;
+}
+
+/* tfx_bufScrollRegion
+ * 
+ * scrolls a rectangular region of a buffer
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack
+ *	1	TfxBuffer userdata
+ * 	2	x coordinate of rectangle to scroll
+ * 	3	y coordinate of rectangle to scroll
+ *	4	width of rectangle to scroll
+ *	5	height of rectangle to scroll
+ *	6	(opt) x scroll direction (-1, 0, 1), defaults to 0
+ *	7	(opt) y scroll direction (-1, 0, 1), defaults to 0
+ * either
+ * 	8	TfxCell
+ * or
+ * 	8	(opt) char, defaults to ' '
+ * 	9	(opt) foreground attributes, defaults to buffer default foreground
+ * 	10	(opt) background attributes, defaults to buffer default background
+ *
+ * Lua Returns:
+ *	-
+ *
+ * Note:
+ *	arguments 6 and 7 (scroll directions) are ints, but only their sign is
+ *	used. Scrolling is always by at most 1 cell.
+ */
+int tfx_bufScrollRegion(lua_State *L)
+{
+	if (!initialized) return 0;
+	
+	TfxCell cel, *celp = &cel;
+
+	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
+	int x = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 4);
+	int h = (int) luaL_checkinteger(L, 5);
+	int sx = (int) luaL_optinteger(L, 6, 0);
+	int sy = (int) luaL_optinteger(L, 7, 0);
+
+	if (tfx_isCell(L, 8)) {
+		maxargs(L, 8);
+		celp = tfx_toCell(L, 8);
+	} else {
+		maxargs(L, 10);
+		cel.ch = _tfx_optchar(L, 8, 0);
+		cel.fg = (uint16_t) luaL_optinteger(L, 9, default_fg) & 0xFFFF;
+		cel.bg = (uint16_t) luaL_optinteger(L, 10, default_bg) & 0xFFFF;
+	}
+
+	tbu_scrollbufferregion(tfxbuf->buf, tfxbuf->w, tfxbuf->h, x, y, w, h, sx, sy, celp);
+	return 0;
+}
 
 /* tfx_bufWidth
  * 
@@ -977,6 +1114,35 @@ static int tfx_setCell(lua_State *L)
 	return 0;
 }
 
+/* tfx_getCell
+ *
+ * gets data from a cell on the terminal
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack:
+ * 	1	x coordinate of cell
+ * 	2	y coordinate of cell
+ *
+ * Lua Returns:
+ *	a TfxCell with the data from the read cell
+ */
+int tfx_getCell(lua_State *L)
+{
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
+
+	if (x < 0 || x >= tb_width() || y < 0 || y >= tb_height())	{
+		lua_pushnil(L);
+		return 1;
+	}
+	TfxCell *tfxcell = tfx_pushCell(L);
+	*tfxcell = CELL(tb_cell_buffer(), tb_width(), x, y);
+
+	return 1;
+}
+
 /* tfx_blit
  *
  * blits the contents of a buffer to the terminal.
@@ -998,32 +1164,29 @@ static int tfx_blit(lua_State *L)
 	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
 	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 3);
-	if (initialized) tb_blit(x, y, tfxbuf->w, tfxbuf->h, tfxbuf->buf);
+	if (initialized) tbu_blit(x, y, tfxbuf->buf, tfxbuf->w, tfxbuf->h);
 	return 0;
 }
 
 /* tfx_rect
  *
- * draws a rectangle. Is used as both the function termfx.rect and the
- * TfxBuffer rect method, depending on the first argument. Either uses
- * the default values for foreground and background, or the values passed
- * on the lua stack.
+ * draws a rectangle. Either uses the default values for foreground and
+ * background, or the values passed on the lua stack.
  * 
  * Arguments:
  *	L	Lua State
  *
  * Lua Stack:
- * 	(1	TfxBuffer)
- * 	+1	x coordinate of rect
- * 	+2	y coordinate of rect
- * 	+3	width of rect
- * 	+4	height of rect
+ * 	1	x coordinate of rect
+ * 	2	y coordinate of rect
+ * 	3	width of rect
+ * 	4	height of rect
  * either
- * 	+5	TfxCell
+ * 	5	TfxCell
  * or
- * 	+5	(opt) char, defaults to ' '
- * 	+6	(opt) foreground attributes, defaults to buffer default foreground
- * 	+7	(opt) background attributes, defaults to buffer default background
+ * 	5	(opt) char, defaults to ' '
+ * 	6	(opt) foreground attributes, defaults to buffer default foreground
+ * 	7	(opt) background attributes, defaults to buffer default background
  *
  * Lua Returns:
  *	false if the rectangle was entirely outside of the terminal, true if not
@@ -1032,55 +1195,111 @@ static int tfx_rect(lua_State *L)
 {
 	if (!initialized) return 0;
 	
-	TfxBuffer *tfxbuf = NULL;
-	int fw, fh, start = 1;
-	uint16_t dfg = default_fg, dbg = default_bg;
-	if (tfx_isBuffer(L, 1)) {
-		tfxbuf = tfx_checkBuffer(L, 1);
-		fw = tfxbuf->w;
-		fh = tfxbuf->h;
-		dfg = tfxbuf->fg;
-		dbg = tfxbuf->bg;
-		start = 2;
+	TfxCell cel, *celp = &cel;
+
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 3);
+	int h = (int) luaL_checkinteger(L, 4);
+	if (tfx_isCell(L, 5)) {
+		maxargs(L, 5);
+		celp = tfx_toCell(L, 5);
 	} else {
-		fw = tb_width();
-		fh = tb_height();
+		maxargs(L, 7);
+		cel.ch = _tfx_optchar(L, 5, 0);
+		cel.fg = (uint16_t) luaL_optinteger(L, 6, default_fg) & 0xFFFF;
+		cel.bg = (uint16_t) luaL_optinteger(L, 7, default_bg) & 0xFFFF;
 	}
+
+	tbu_fillregion(x, y, w, h, celp);
+	return 0;
+}
+
+/* tfx_copyRegion
+ * 
+ * copies a rectangular region to another place
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack
+ * 	1	target x coordinate for copy
+ * 	2	target y coordinate for copy
+ * 	3	source x coordinate
+ * 	4	source y coordinate
+ *	5	width of rectangle to copy
+ *	6	height of rectangle to copy
+ *
+ * Lua Returns:
+ *	-
+ */
+int tfx_copyRegion(lua_State *L)
+{
+	if (!initialized) return 0;
 	
-	int x = (int) luaL_checkinteger(L, start) - top_left_coord;
-	int y = (int) luaL_checkinteger(L, start + 1) - top_left_coord;
-	int w = (int) luaL_checkinteger(L, start + 2);
-	int h = (int) luaL_checkinteger(L, start + 3);
-	uint32_t ch;
-	uint16_t fg, bg;
-	if (tfx_isCell(L, start + 4)) {
-		maxargs(L, start + 4);
-		TfxCell *tfxcell = tfx_toCell(L, start + 4);
-		ch = tfxcell->ch;
-		fg = tfxcell->fg;
-		bg = tfxcell->bg;
+	int tx = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int ty = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int x = (int) luaL_checkinteger(L, 3) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 4) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 5);
+	int h = (int) luaL_checkinteger(L, 6);
+
+	tbu_copyregion(tx, ty, x, y, w, h);
+	return 0;
+}
+
+/* tfx_scrollRegion
+ * 
+ * scrolls a rectangular region
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack
+ * 	1	x coordinate of rectangle to scroll
+ * 	2	y coordinate of rectangle to scroll
+ *	3	width of rectangle to scroll
+ *	4	height of rectangle to scroll
+ *	5	(opt) x scroll direction (-1, 0, 1), defaults to 0
+ *	6	(opt) y scroll direction (-1, 0, 1), defaults to 0
+ * either
+ * 	7	TfxCell
+ * or
+ * 	7	(opt) char, defaults to ' '
+ * 	8	(opt) foreground attributes, defaults to buffer default foreground
+ * 	9	(opt) background attributes, defaults to buffer default background
+ *
+ * Lua Returns:
+ *	-
+ *
+ * Note:
+ *	arguments 5 and 6 (scroll directions) are ints, but only their sign is
+ *	used. Scrolling is always by at most 1 cell.
+ */
+int tfx_scrollRegion(lua_State *L)
+{
+	if (!initialized) return 0;
+	
+	TfxCell cel, *celp = &cel;
+
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, 3);
+	int h = (int) luaL_checkinteger(L, 4);
+	int sx = (int) luaL_optinteger(L, 5, 0);
+	int sy = (int) luaL_optinteger(L, 6, 0);
+
+	if (tfx_isCell(L, 7)) {
+		maxargs(L, 7);
+		celp = tfx_toCell(L, 7);
 	} else {
-		maxargs(L, start + 6);
-		ch = _tfx_optchar(L, start + 4, 0);
-		fg = (uint16_t) luaL_optinteger(L, start + 5, dfg) & 0xFFFF;
-		bg = (uint16_t) luaL_optinteger(L, start + 6, dbg) & 0xFFFF;
+		maxargs(L, 9);
+		cel.ch = _tfx_optchar(L, 7, 0);
+		cel.fg = (uint16_t) luaL_optinteger(L, 8, default_fg) & 0xFFFF;
+		cel.bg = (uint16_t) luaL_optinteger(L, 9, default_bg) & 0xFFFF;
 	}
-	int cx, cy;
-	
-	if (w > 0 && x + w <= fw && h > 0 && y + h <= fh) {
-		struct tb_cell c;
-		c.ch = ch < ' ' ? ' ' : ch;
-		c.fg = fg;
-		c.bg = bg;
-		for (cx = x; cx < x + w; ++cx) {
-			for (cy = y; cy < y + h; ++cy) {
-				if (tfxbuf)
-					_tfx_bufChangeCell(tfxbuf, cx, cy, &c);
-				else
-					tb_put_cell(cx, cy, &c);
-			}
-		}
-	}
+
+	tbu_scrollregion(x, y, w, h, sx, sy, celp);
 	return 0;
 }
 
@@ -1250,6 +1469,9 @@ static int tfx_pollEvent(lua_State *L)
 		switch (evt.type) {
 			case TB_EVENT_KEY: lua_pushliteral(L, "key"); break;
 			case TB_EVENT_RESIZE: lua_pushliteral(L, "resize"); break;
+#ifdef TB_EVENT_MOUSE
+			case TB_EVENT_MOUSE: lua_pushliteral(L, "mouse"); break;
+#endif
 			default: lua_pushliteral(L, "unknown");
 		}
 		lua_rawset(L, -3);
@@ -1267,11 +1489,19 @@ static int tfx_pollEvent(lua_State *L)
 			lua_rawset(L, -3);
 			
 			lua_pushliteral(L, "key");
-			lua_pushinteger(L, evt.key);
+			if (evt.ch == 0) {
+				lua_pushinteger(L, evt.key);
+			} else {
+				lua_pushnil(L);
+			}
 			lua_rawset(L, -3);
 			
 			lua_pushliteral(L, "ch");
-			lua_pushinteger(L, evt.ch);
+			if (evt.ch != 0) {
+				lua_pushinteger(L, evt.ch);
+			} else {
+				lua_pushnil(L);
+			}
 			lua_rawset(L, -3);
 			
 			lua_pushliteral(L, "char");
@@ -1292,6 +1522,20 @@ static int tfx_pollEvent(lua_State *L)
 			lua_pushliteral(L, "h");
 			lua_pushinteger(L, evt.h);
 			lua_rawset(L, -3);
+#ifdef TB_EVENT_MOUSE
+		} else if (evt.type == TB_EVENT_MOUSE) {
+			lua_pushliteral(L, "x");
+			lua_pushinteger(L, evt.x + top_left_coord);
+			lua_rawset(L, -3);
+
+			lua_pushliteral(L, "y");
+			lua_pushinteger(L, evt.y + top_left_coord);
+			lua_rawset(L, -3);
+
+			lua_pushliteral(L, "key");
+			lua_pushinteger(L, evt.key);
+			lua_rawset(L, -3);
+#endif
 		}
 	} else if (eno == 0) {
 		lua_pushnil(L);
@@ -1309,8 +1553,11 @@ static const struct luaL_Reg ltfxbuf_methods [] = {
 	{"attributes", tfx_bufAttributes},
 	{"clear", tfx_bufClear},
 	{"setcell", tfx_bufSetcell},
+	{"getcell", tfx_bufGetCell},
 	{"blit", tfx_bufBlit},
-	{"rect", tfx_rect},
+	{"rect", tfx_bufRect},
+	{"copyregion", tfx_bufCopyRegion},
+	{"scrollregion", tfx_bufScrollRegion},
 	{"printat", tfx_printAt},
 	{"width", tfx_bufWidth},
 	{"height", tfx_bufHeight},
@@ -1334,13 +1581,16 @@ static const struct luaL_Reg ltermfx [] ={
 	{"hidecursor", tfx_hideCursor},
 	{"newcell", tfx_newCell},
 	{"setcell", tfx_setCell},
+	{"getcell", tfx_getCell},
 	{"newbuffer", tfx_newBuffer},
 	{"blit", tfx_blit},
 	{"rect", tfx_rect},
+	{"copyregion", tfx_copyRegion},
+	{"scrollregion", tfx_scrollRegion},
+	{"printat", tfx_printAt},
 	{"inputmode", tfx_inputMode},
 	{"outputmode", tfx_outputMode},
 	{"pollevent", tfx_pollEvent},
-	{"printat", tfx_printAt},
 	
 	{NULL, NULL}
 };
@@ -1431,6 +1681,16 @@ static void tfx_addconstants(lua_State *L)
 	ADDCONST("ARROW_DOWN", TB_KEY_ARROW_DOWN);
 	ADDCONST("ARROW_LEFT", TB_KEY_ARROW_LEFT);
 	ADDCONST("ARROW_RIGHT", TB_KEY_ARROW_RIGHT);
+
+#ifdef TB_INPUT_MOUSE
+	ADDCONST("MOUSE_LEFT", TB_KEY_MOUSE_LEFT);
+	ADDCONST("MOUSE_RIGHT", TB_KEY_MOUSE_RIGHT);
+	ADDCONST("MOUSE_MIDDLE", TB_KEY_MOUSE_MIDDLE);
+	ADDCONST("MOUSE_RELEASE", TB_KEY_MOUSE_RELEASE);
+	ADDCONST("MOUSE_WHEEL_UP", TB_KEY_MOUSE_WHEEL_UP);
+	ADDCONST("MOUSE_WHEEL_DOWN", TB_KEY_MOUSE_WHEEL_DOWN);
+#endif
+
 	ADDCONST("CTRL_TILDE", TB_KEY_CTRL_TILDE);
 	ADDCONST("CTRL_2", TB_KEY_CTRL_2);
 	ADDCONST("CTRL_A", TB_KEY_CTRL_A);
@@ -1498,6 +1758,9 @@ static void tfx_addconstants(lua_State *L)
 	lua_newtable(L);
 	ADDCONST("ESC", TB_INPUT_ESC);
 	ADDCONST("ALT", TB_INPUT_ALT);
+#ifdef TB_INPUT_MOUSE
+	ADDCONST("MOUSE", TB_INPUT_MOUSE);
+#endif
 	lua_rawset(L, -3);
 
 	lua_pushliteral(L, "output");

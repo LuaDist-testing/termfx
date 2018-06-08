@@ -2,8 +2,8 @@
  *
  * provide simple terminal interface for lua
  *
- * Gunnar Zötl <gz@tset.de>, 2014
- * Released under MIT/X11 license. See file LICENSE for details.
+ * Gunnar Zötl <gz@tset.de>, 2014-2015
+ * Released under the terms of the MIT license. See file LICENSE for details.
  */
 
 #include "lua.h"
@@ -177,10 +177,17 @@ static int tfx_colorinfo(lua_State *L)
 		return 2;
 	}
 	maxargs(L, 1);
-	if (omode == TB_OUTPUT_216)
+	if (omode == TB_OUTPUT_NORMAL) {
+		if (col > 0 && col <= 8) {
+			col -= 1;
+		} else {
+			col = 8;
+		}
+	} else if (omode == TB_OUTPUT_216) {
 		col += 16;
-	else if (omode == TB_OUTPUT_GRAYSCALE)
+	} else if (omode == TB_OUTPUT_GRAYSCALE) {
 		col += 232;
+	}
 	if (col < 256) {
 		unsigned int r, g, b;
 		lua_pushstring(L, xterm_color_data[col]);

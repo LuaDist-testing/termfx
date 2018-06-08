@@ -18,28 +18,34 @@ extern "C" {
  * These are a safe subset of terminfo keys, which exist on all popular
  * terminals. Termbox uses only them to stay truly portable.
  */
-#define TB_KEY_F1          (0xFFFF-0)
-#define TB_KEY_F2          (0xFFFF-1)
-#define TB_KEY_F3          (0xFFFF-2)
-#define TB_KEY_F4          (0xFFFF-3)
-#define TB_KEY_F5          (0xFFFF-4)
-#define TB_KEY_F6          (0xFFFF-5)
-#define TB_KEY_F7          (0xFFFF-6)
-#define TB_KEY_F8          (0xFFFF-7)
-#define TB_KEY_F9          (0xFFFF-8)
-#define TB_KEY_F10         (0xFFFF-9)
-#define TB_KEY_F11         (0xFFFF-10)
-#define TB_KEY_F12         (0xFFFF-11)
-#define TB_KEY_INSERT      (0xFFFF-12)
-#define TB_KEY_DELETE      (0xFFFF-13)
-#define TB_KEY_HOME        (0xFFFF-14)
-#define TB_KEY_END         (0xFFFF-15)
-#define TB_KEY_PGUP        (0xFFFF-16)
-#define TB_KEY_PGDN        (0xFFFF-17)
-#define TB_KEY_ARROW_UP    (0xFFFF-18)
-#define TB_KEY_ARROW_DOWN  (0xFFFF-19)
-#define TB_KEY_ARROW_LEFT  (0xFFFF-20)
-#define TB_KEY_ARROW_RIGHT (0xFFFF-21)
+#define TB_KEY_F1               (0xFFFF-0)
+#define TB_KEY_F2               (0xFFFF-1)
+#define TB_KEY_F3               (0xFFFF-2)
+#define TB_KEY_F4               (0xFFFF-3)
+#define TB_KEY_F5               (0xFFFF-4)
+#define TB_KEY_F6               (0xFFFF-5)
+#define TB_KEY_F7               (0xFFFF-6)
+#define TB_KEY_F8               (0xFFFF-7)
+#define TB_KEY_F9               (0xFFFF-8)
+#define TB_KEY_F10              (0xFFFF-9)
+#define TB_KEY_F11              (0xFFFF-10)
+#define TB_KEY_F12              (0xFFFF-11)
+#define TB_KEY_INSERT           (0xFFFF-12)
+#define TB_KEY_DELETE           (0xFFFF-13)
+#define TB_KEY_HOME             (0xFFFF-14)
+#define TB_KEY_END              (0xFFFF-15)
+#define TB_KEY_PGUP             (0xFFFF-16)
+#define TB_KEY_PGDN             (0xFFFF-17)
+#define TB_KEY_ARROW_UP         (0xFFFF-18)
+#define TB_KEY_ARROW_DOWN       (0xFFFF-19)
+#define TB_KEY_ARROW_LEFT       (0xFFFF-20)
+#define TB_KEY_ARROW_RIGHT      (0xFFFF-21)
+#define TB_KEY_MOUSE_LEFT       (0xFFFF-22)
+#define TB_KEY_MOUSE_RIGHT      (0xFFFF-23)
+#define TB_KEY_MOUSE_MIDDLE     (0xFFFF-24)
+#define TB_KEY_MOUSE_RELEASE    (0xFFFF-25)
+#define TB_KEY_MOUSE_WHEEL_UP   (0xFFFF-26)
+#define TB_KEY_MOUSE_WHEEL_DOWN (0xFFFF-27)
 
 /* These are all ASCII code points below SPACE character and a BACKSPACE key. */
 #define TB_KEY_CTRL_TILDE       0x00
@@ -95,7 +101,7 @@ extern "C" {
  * #define TB_KEY_CTRL_0 clash with '0'
  */
 
-/* Currently there is only one modificator. See also struct tb_event's mod
+/* Currently there is only one modifier. See also struct tb_event's mod
  * field.
  */
 #define TB_MOD_ALT 0x01
@@ -134,10 +140,12 @@ struct tb_cell {
 
 #define TB_EVENT_KEY    1
 #define TB_EVENT_RESIZE 2
+#define TB_EVENT_MOUSE  3
 
 /* This struct represents a termbox event. The 'mod', 'key' and 'ch' fields are
  * valid if 'type' is TB_EVENT_KEY. The 'w' and 'h' fields are valid if 'type'
- * is TB_EVENT_RESIZE.
+ * is TB_EVENT_RESIZE. The 'x' and 'y' fields are valid if 'type' is
+ * TB_EVENT_MOUSE.
  */
 struct tb_event {
 	uint8_t type;
@@ -146,10 +154,12 @@ struct tb_event {
 	uint32_t ch;
 	int32_t w;
 	int32_t h;
+	int32_t x;
+	int32_t y;
 };
 
 /* Error codes returned by tb_init(). All of them are self-explanatory, except
- * the pipe trap error. Termbox uses unix pipes in order to deliever a message
+ * the pipe trap error. Termbox uses unix pipes in order to deliver a message
  * from a signal handler (SIGWINCH) to the main event reading loop. Honestly in
  * most cases you should just check the returned code as < 0.
  */
@@ -179,7 +189,7 @@ SO_IMPORT int tb_height(void);
 SO_IMPORT void tb_clear(void);
 SO_IMPORT void tb_set_clear_attributes(uint16_t fg, uint16_t bg);
 
-/* Syncronizes the internal back buffer with the terminal. */
+/* Synchronizes the internal back buffer with the terminal. */
 SO_IMPORT void tb_present(void);
 
 #define TB_HIDE_CURSOR -1
@@ -199,12 +209,22 @@ SO_IMPORT void tb_change_cell(int x, int y, uint32_t ch, uint16_t fg, uint16_t b
 /* Copies the buffer from 'cells' at the specified position, assuming the
  * buffer is a two-dimensional array of size ('w' x 'h'), represented as a
  * one-dimensional buffer containing lines of cells starting from the top.
+ *
+ * (DEPRECATED: use tb_cell_buffer() instead and copy memory on your own)
  */
 SO_IMPORT void tb_blit(int x, int y, int w, int h, const struct tb_cell *cells);
 
-#define TB_INPUT_CURRENT 0
-#define TB_INPUT_ESC     1
-#define TB_INPUT_ALT     2
+/* Returns a pointer to internal cell back buffer. You can get its dimensions
+ * using tb_width() and tb_height() functions. The pointer stays valid as long
+ * as no tb_clear() and tb_present() calls are made. The buffer is
+ * one-dimensional buffer containing lines of cells starting from the top.
+ */
+SO_IMPORT struct tb_cell *tb_cell_buffer();
+
+#define TB_INPUT_CURRENT 0 /* 000 */
+#define TB_INPUT_ESC     1 /* 001 */
+#define TB_INPUT_ALT     2 /* 010 */
+#define TB_INPUT_MOUSE   4 /* 100 */
 
 /* Sets the termbox input mode. Termbox has two input modes:
  * 1. Esc input mode.
@@ -247,7 +267,7 @@ SO_IMPORT int tb_select_input_mode(int mode);
  *
  * 2. TB_OUTPUT_216        => [0..216]
  *    This mode supports the 3rd range of the 256 mode only.
- *    But you dont need to provide an offset.
+ *    But you don't need to provide an offset.
  *
  * 3. TB_OUTPUT_GRAYSCALE  => [0..23]
  *    This mode supports the 4th range of the 256 mode only.

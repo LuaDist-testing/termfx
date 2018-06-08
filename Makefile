@@ -1,7 +1,7 @@
 # simple Makefile for termfx. Works for Linux, MacOS X, probably other unixen
 #
-# Gunnar Zötl <gz@tset.de>, 2014.
-# Released under MIT/X11 license. See file LICENSE for details.
+# Gunnar Zötl <gz@tset.de>, 2014-2015.
+# Released under the terms of the MIT license. See file LICENSE for details.
 
 TERMBOX = ./termbox
 
@@ -9,23 +9,23 @@ TERMBOX = ./termbox
 # the following values manually.
 OS = $(shell uname -s)
 LUAVERSION = $(shell lua -e "print(string.match(_VERSION, '%d+%.%d+'))")
-LUA_BINDIR ?= $(shell dirname `which lua`)
+LUA_BINDIR = $(shell dirname `which lua`)
 LUAROOT = $(shell dirname $(LUA_BINDIR))
 
-OBJS = termfx.o termfx_color.o
+OBJS = termfx.o termfx_color.o tbutils.o
 
 TARGET = termfx.so
 
-CC ?= gcc
-CFLAGS ?= -fPIC -Wall
-LUA_INCDIR ?= $(LUAROOT)/include
-LUA_LIBDIR ?= $(LUAROOT)/lib
+CC = gcc
+CFLAGS = -fPIC -Wall
+LUA_INCDIR = $(LUAROOT)/include
+LUA_LIBDIR = $(LUAROOT)/lib
 
 # OS specialities
 ifeq ($(OS),Darwin)
-LIBFLAG ?= -bundle -undefined dynamic_lookup -all_load
+LIBFLAG = -bundle -undefined dynamic_lookup -all_load
 else
-LIBFLAG ?= -shared
+LIBFLAG = -shared
 endif
 
 ifdef DEBUG
@@ -39,8 +39,8 @@ endif
 
 # install target locations
 INST_DIR = /usr/local
-INST_LIBDIR ?= $(INST_DIR)/lib/lua/$(LUAVERSION)
-INST_LUADIR ?= $(INST_DIR)/share/lua/$(LUAVERSION)
+INST_LIBDIR = $(INST_DIR)/lib/lua/$(LUAVERSION)
+INST_LUADIR = $(INST_DIR)/share/lua/$(LUAVERSION)
 
 all: $(TARGET)
 
@@ -68,7 +68,7 @@ $(TERMBOX)/build/src/libtermbox.a: $(TERMBOX)
 $(TERMBOX)/src/termbox.h: $(TERMBOX)
 	touch $@
 
-install: all
+install:
 	mkdir -p $(INST_LIBDIR)
 	cp $(TARGET) $(INST_LIBDIR)
 
@@ -77,6 +77,7 @@ clean:
 	find . -name .DS_Store -exec rm {} \;
 	find . -name "._*" -exec rm {} \;
 	rm -f *.a *.o *.so core termbox.h
+	rm -f screenshot.html samples/screenshot.html
 	(cd $(TERMBOX) && ./waf distclean)
 
 distclean: clean

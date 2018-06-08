@@ -1,5 +1,14 @@
 # CHANGELOG #
 
+## Version 0.7 ##
+
+* added mouse support from newer versions of termbox
+* in the case of key events, either key or char are now nil instead of 0.
+* added termfx.copyregion, termfx.scrollregion and the same as buffer
+  methods
+* added termgfx.getcell() and buffer:getcell()
+* fixed a bug in termfx.colorinfo() for NORMAL output mode.
+
 ## Version 0.6 ##
 
 * changed termfx.attributes() and  and buf:attributes() to have optional

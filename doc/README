@@ -2,8 +2,8 @@
 
 ## TermFX ##
 
-Author: Gunnar Zötl , 2014.  
-Released under MIT/X11 license. See file LICENSE for details.
+Author: Gunnar Zötl , 2014-2015.  
+Released the terms of the MIT license. See file LICENSE for details.
 
 ## Introduction ##
 
@@ -93,14 +93,12 @@ into a pcall()ed function, like so:
 
 `termfx.init()`
 :	initializes the library and the display. `termfx.init()` may fail
-	and in that case throws an error.
-
-:	all of the other functions, except for buffer and cell constructors
-	and methods, work only after the terminal has been initialized using
-	this function, and will silently fail, or in the case of queries
-	return nil, if that is not the case. Because of this, you can for
-	example check whether the terminal has been initialized by querying
-	its width and checking the result against nil.
+	and in that case throws an error. All of the other functions, except for
+	buffer and cell constructors and methods, work only after the terminal
+	has been initialized using this function, and will silently fail, or in
+	the case of queries return nil, if that is not the case. Because of this,
+	you can for example check whether the terminal has been initialized by
+	querying its width and checking the result against nil.
 
 `termfx.shutdown()`
 :	shuts the library down and puts the terminal into a sane mode for
@@ -153,10 +151,12 @@ into a pcall()ed function, like so:
 :	returns the color value (a rgb string with format "#abcdef") and
 	red, green and blue values for a color number. The range of n
 	depends on the current output mode:
-		* 0..255 for `termfx.output.COL256`
-		* 0..215 for `termfx.output.COL216`
-		* 0..23 for `termfx.output.GREYSCALE`
-		* 0..15 for `termfx.output.NORMAL`
+
+	* 0..255 for `termfx.output.COL256`
+	* 0..215 for `termfx.output.COL216`
+	* 0..23 for `termfx.output.GREYSCALE`
+	* 0..15 for `termfx.output.NORMAL`
+	
 	For values outside of the valid range for the current output mode,
 	the function will return nil.
 
@@ -187,6 +187,10 @@ into a pcall()ed function, like so:
 	values default to space (' ') for the char, and the default
 	foreground and background attributes.
 
+`cel = termfx.getcell(x, y)`
+:	gets the cell from the coordinates x, y on the terminal. If x or y lie
+	outside of the terminal, nil is returned.
+
 `buf = termfx.newbuffer(w, h)`
 :	creates a new offscreen buffer with width w and height h. The new
 	buffer gets the default foreground and background attributes as its
@@ -205,6 +209,16 @@ into a pcall()ed function, like so:
 	terminal, otherwise the respective values default to space (' ') for
 	the char, and the default foreground and background attributes.
 
+`termfx.copyregion(tx, ty, x, y, w, h)`
+:	copy the the rectangle starting at x, y with width w and height h to
+	position tx, ty on the terminal. Source and target rectangle may overlap.
+
+`termfx.scrollregion(x, y, w, h [, sx [, sy]])`
+:	scrolls the rectangle starting at x, y with width w and height h on the
+	terminal by sx and sy. sx and sy are optional and default to 0. If they
+	have other values, only their sign is used. Scrolling is by 1 column or
+	row at most.
+
 `termfx.printat(x, y, what [, w])`
 :	prints a string to the terminal at position x, y up to maximum width
 	w. If w is omitted, it defaults to the length of what. what can be a
@@ -217,13 +231,16 @@ into a pcall()ed function, like so:
 	`termfx.input.ALT`. If the newmode argument was not given, returns
 	the current input mode, otherwise returns the mode just set.
 	
-:	Modes are:
+	Modes are:
 
-:	* `termfx.input.ESC`: when an ESC sequence is in the buffer and it
+	* `termfx.input.ESC`: when an ESC sequence is in the buffer and it
 		doesn't match any known ESC sequence, ESC means `termfx.key.ESC`
 	* `termfx.input.ALT`: when an ESC sequence is in the buffer and it
 		doesn't match any known sequence, ESC enables `"ALT"` modifier for
 		the next keyboard event.
+	* `termfx.input.MOUSE`: specify this if you are interested in mouse
+		events. This can be added / or'ed to `termfx.input.ESC` or
+		`termfx.input.ALT`
 
 `mode = termfx.outputmode([newmode])`
 :	sets the terminal output mode. See the section on colors and
@@ -236,27 +253,38 @@ into a pcall()ed function, like so:
 	wait forever. On Timeout, the function returns nil, on error it
 	returns nil+error message, otherwise it returns a table with
 	information about the event. Known events are `"key"` for a keyboard
-	event or `"resize"` if the terminal was resized. Depending on which
-	event occurred, the result table looks like this:
+	event, `"mouse"` for a mouse event or `"resize"` if the terminal was
+	resized. Depending on which event occurred, the result table looks
+	like this:
 
-:	For the event `"key"`:
+	For the event `"key"`:
 
-:	* `type`: `"key"`
+	* `type`: `"key"`
 	* `elapsed`: the number of milliseconds spent in `termfx.pollevent()`
 	* `mod`: `nil` or `"ALT"`, no other modifiers are returned
 	* `key`: the numeric code of the key pressed, if it was a special key
 	* `ch`: the numeric code of the key pressed for standard keys
 	* `char`: the char (possibly utf8 encoded) for ch
 
-:	either the field `key` or the field `ch` is 0. If the `key` field is
-	not 0, it can be checked against one of the constants in `termfx.key`.
-	If the `ch` field is not 0, it is the unicode value of the char that
+	either the field `key` or the field `ch` is nil. If the `key` field is
+	not nil, it can be checked against one of the constants in `termfx.key`.
+	If the `ch` field is not nil, it is the unicode value of the char that
 	was pressed on the keyboard. In that case, the `char` field will
 	contain a string containing the character represented by `ch`.
-	
-:	For the event `"resize"`:
 
-:	* `type`: `"resize"`
+	For the event `"mouse"`:
+
+	* `type`: `"mouse"`
+	* `elapsed`: the number of milliseconds spent in `termfx.pollevent()`
+	* `key`: the numeric code of the button pressed
+	* `x`, `y`: the terminal coordinates where the mouse event occurred.
+
+	on release of any button, the value of key will be
+	termfx.key.MOUSE_RELEASED
+
+	For the event `"resize"`:
+
+	* `type`: `"resize"`
 	* `elapsed`: the number of milliseconds spent in `termfx.pollevent()`
 	* `w`: the new width
 	* `h`: the new height
@@ -269,31 +297,40 @@ buffer on which they are called. So for a detailed description of the
 individual methods see above.
 
 `buf:attributes([bg, fg])`
-:	set or get default cell attributes for the buffer
+:	set or get default cell attributes for the buffer.
 
 `buf:clear([fg, bg])`
-:	clear the buffer
+:	clear the buffer.
 
 `buf:setcell(x, y [, cel]) or buf:setcell(x, y [, ch [, fg [, bg]]])`
-:	set a cell in the buffer
+:	set a cell in the buffer.
+
+`cel = buf:getcell(x, y)`
+:	gets a cell from a buffer.
 
 `buf:blit(x, y, src)`
 :	blits the contents of the buffer src to position x, y of buffer buf.
 
 `buf:rect(x, y, w, h [, cel]) or ok = buf:rect(x, y, w, h [, ch [, fg [, bg]]])`
-:	draw a rectangle in the buffer
+:	draw a rectangle in the buffer.
+
+`buf:copyregion(tx, ty, x, y, w, h)`
+:	copy a region of the buffer.
+
+`buf:scrollregion(x, y, w, h [, sx [, sy]])`
+:	scrolls a region of the buffer.
 
 `buf:printat(x, y, what [, w])`
-:	print a string to the buffer
+:	print a string to the buffer.
 
 `w = buf:width()`
-:	return the buffer width
+:	return the buffer width.
 
 `h = buf:height()`
-:	return the buffer height
+:	return the buffer height.
 
 `w, h = buf:size()`
-:	return the buffer width and height
+:	return the buffer width and height.
 
 ### Colors and attributes ###
 
@@ -319,12 +356,11 @@ The output modes are:
 
 `termfx.output.NORMAL`
 :	this is an 8 color mode, in which only the 8 predefined colors are
-	available.
+	available as colors 1-8, plus a default color at position 0.
 
 `termfx.output.COL256`
-:	this is a mode with 256 colors.  
-
-:	* the first 8 colors (0-7) are the 8 predefined colors.  
+:	this is a mode with 256 colors.
+	* the first 8 colors (0-7) are the 8 predefined colors.  
 	* the next 8 colors (8-15) are the first 8 colors + `termfx.attr.BOLD`  
 	* then (16-231) follow 216 different colors  
 	* finally (232-255) 24 shades of grey
@@ -434,6 +470,15 @@ available to your terminal.
 * `termfx.key.SPACE`
 * `termfx.key.BACKSPACE2`
 * `termfx.key.CTRL_8`
+
+If mouse support is available, you also have these constants:
+
+* `termfx.key.MOUSE_LEFT`
+* `termfx.key.MOUSE_MIDDLE`
+* `termfx.key.MOUSE_RIGHT`
+* `termfx.key.MOUSE_RELEASE`
+* `termfx.key.MOUSE_WHEEL_UP`
+* `termfx.key.MOUSE_WHEEL_DOWN`
 
 ### Unicode ###
 

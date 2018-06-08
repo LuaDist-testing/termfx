@@ -2,11 +2,11 @@
  *
  * provide simple terminal interface for lua
  *
- * Gunnar Zötl <gz@tset.de>, 2014
- * Released under MIT/X11 license. See file LICENSE for details.
+ * Gunnar Zötl <gz@tset.de>, 2014-2015
+ * Released under the terms of the MIT license. See file LICENSE for details.
  */
 
-#define _VERSION "0.6"
+#define _VERSION "0.7"
 
 #define TFXCELL "TfxCell"
 #define TFXBUFFER "TfxBuffer"
