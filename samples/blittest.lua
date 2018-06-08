@@ -9,25 +9,12 @@ function makespr(s, fg, bg)
 	for y=1, s/2 do
 		for x=1, s do
 			local lx, ly = (x-0.5)/s, (2*y-1)/s
-			local v = (math.sin(lx*math.pi) + math.sin(ly*math.pi)) / 2 * #c
+			local v = math.floor((math.sin(lx*math.pi) + math.sin(ly*math.pi)) / 2 * #c)
 			local ch = string.sub(c, v, v)
 			spr:setcell(x, y, ch)
 		end
 	end
 	return spr
-end
-
-function print_at(x, y, str, pw)
-	local w, h = tfx.width(), tfx.height()
-	if x > w or y > h then return end
-	str = tostring(str)
-	pw = pw or #str
-	if x + pw-1 > w then pw = w - x end
-	for i = 1, pw do
-		local ch = string.sub(str, i, i)
-		if ch == "" then ch = " " end
-		tfx.setcell(x - 1 + i, y, string.byte(ch))
-	end
 end
 
 tfx.outputmode(tfx.output.NORMAL)
@@ -55,8 +42,8 @@ ok, err = pcall(function()
 		y = y + yo
 		if y > h or y < 1-sh then yo = -yo end
 
-		print_at(1, tfx.height(), "print 1.."..#sprites.." for sprite size, q to quit")
-		print_at(1, 1, "Current size: "..snum.." ("..spr:width().."x"..spr:height()..")")
+		tfx.printat(1, tfx.height(), "print 1.."..#sprites.." for sprite size, q to quit")
+		tfx.printat(1, 1, "Current size: "..snum.." ("..spr:width().."x"..spr:height()..")")
 
 		tfx.present()
 		evt = tfx.pollevent(333)

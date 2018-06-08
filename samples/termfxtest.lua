@@ -4,19 +4,6 @@ tfx.init()
 tfx.inputmode(tfx.input.ALT)
 tfx.outputmode(tfx.output.COL256)
 
-function print_at(x, y, str, pw)
-	local w, h = tfx.width(), tfx.height()
-	if x > w or y > h then return end
-	str = tostring(str)
-	pw = pw or #str
-	if x + pw-1 > w then pw = w - x end
-	for i = 1, pw do
-		local ch = string.sub(str, i, i)
-		if ch == "" then ch = " " end
-		tfx.setcell(x - 1 + i, y, string.byte(ch))
-	end
-end
-
 function draw_box(x, y, w, h)
 	local ccell = tfx.newcell('+')
 	local hcell = tfx.newcell('-')
@@ -54,12 +41,12 @@ function ask(msg)
 	local mw = #msg
 	if mw < 6 then mw = 6 end
 	local x, y, w, h = box(mw, 3)
-	print_at(x, y, msg, w)
+	tfx.printat(x, y, msg, w)
 	local p = x + math.floor((w - 6) / 2)
 	tfx.attributes(tfx.color.BLACK, tfx.color.GREEN)
-	print_at(p, y+2, "Yes")
+	tfx.printat(p, y+2, "Yes")
 	tfx.attributes(tfx.color.BLACK, tfx.color.RED)
-	print_at(p+4, y+2, "No")
+	tfx.printat(p+4, y+2, "No")
 	tfx.present()
 	
 	local answer = nil
@@ -83,9 +70,9 @@ function select(msg, tbl)
 	end
 
 	local x, y, w, h = box(mw, mh+2)
-	print_at(x, y, msg, w)
+	tfx.printat(x, y, msg, w)
 	for i=1, mh do
-		print_at(x, y+1+i, i.." "..tbl[i])
+		tfx.printat(x, y+1+i, i.." "..tbl[i])
 	end
 	tfx.present()
 	
@@ -103,44 +90,44 @@ function pr_event(x, y, evt)
 	evt = evt or {}
 
 	tfx.attributes(tfx.color.BLUE, tfx.color.WHITE)
-	print_at(x, y, "Event:")
-	print_at(x+7, y, evt.type)
+	tfx.printat(x, y, "Event:")
+	tfx.printat(x+7, y, evt.type)
 	
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLACK)
 	if evt.type == "key" then
-		print_at(x, y+1, "mod")
-		print_at(x+7, y+1, evt.mod)
-		print_at(x, y+2, "key")
-		print_at(x+7, y+2, evt.key)
-		print_at(x, y+3, "ch")
-		print_at(x+7, y+3, evt.ch)
-		print_at(x, y+4, "char")
-		print_at(x+7, y+4, evt.char)
+		tfx.printat(x, y+1, "mod")
+		tfx.printat(x+7, y+1, evt.mod)
+		tfx.printat(x, y+2, "key")
+		tfx.printat(x+7, y+2, evt.key)
+		tfx.printat(x, y+3, "ch")
+		tfx.printat(x+7, y+3, evt.ch)
+		tfx.printat(x, y+4, "char")
+		tfx.printat(x+7, y+4, evt.char)
 	elseif evt.type == "resize" then
-		print_at(x, y+1, "w")
-		print_at(x+7, y+1, evt.w)
-		print_at(x, y+2, "h")
-		print_at(x+7, y+2, evt.h)
+		tfx.printat(x, y+1, "w")
+		tfx.printat(x+7, y+1, evt.w)
+		tfx.printat(x, y+2, "h")
+		tfx.printat(x+7, y+2, evt.h)
 	end
 end
 
 function pr_colors(x, y, w)
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLACK)
-	print_at(x, y, "BLACK", w)
+	tfx.printat(x, y, "BLACK", w)
 	tfx.attributes(tfx.color.WHITE, tfx.color.RED)
-	print_at(x, y+1, "RED", w)
+	tfx.printat(x, y+1, "RED", w)
 	tfx.attributes(tfx.color.WHITE, tfx.color.GREEN)
-	print_at(x, y+2, "GREEN", w)
+	tfx.printat(x, y+2, "GREEN", w)
 	tfx.attributes(tfx.color.BLACK, tfx.color.YELLOW)
-	print_at(x, y+3, "YELLOW", w)
+	tfx.printat(x, y+3, "YELLOW", w)
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLUE)
-	print_at(x, y+4, "BLUE", w)
+	tfx.printat(x, y+4, "BLUE", w)
 	tfx.attributes(tfx.color.BLACK, tfx.color.MAGENTA)
-	print_at(x, y+5, "MAGENTA", w)
+	tfx.printat(x, y+5, "MAGENTA", w)
 	tfx.attributes(tfx.color.BLACK, tfx.color.CYAN)
-	print_at(x, y+6, "CYAN", w)
+	tfx.printat(x, y+6, "CYAN", w)
 	tfx.attributes(tfx.color.BLACK, tfx.color.WHITE)
-	print_at(x, y+7, "WHITE", w)
+	tfx.printat(x, y+7, "WHITE", w)
 end
 
 function find_name(tbl, val)
@@ -165,12 +152,12 @@ function pr_stats(x, y)
 	local om = tfx.outputmode()
 	
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLACK)
-	print_at(x, y, "Size:")
-	print_at(x+8, y, tw .. " x " .. th)
-	print_at(x, y+1, "Input: ")
-	print_at(x+8, y+1, find_name(tfx.input, im))
-	print_at(x, y+2, "Output: ")
-	print_at(x+8, y+2, find_name(tfx.output, om))
+	tfx.printat(x, y, "Size:")
+	tfx.printat(x+8, y, tw .. " x " .. th)
+	tfx.printat(x, y+1, "Input: ")
+	tfx.printat(x+8, y+1, find_name(tfx.input, im))
+	tfx.printat(x, y+2, "Output: ")
+	tfx.printat(x+8, y+2, find_name(tfx.output, om))
 end
 
 function pr_coltbl(x, y)
@@ -180,9 +167,9 @@ function pr_coltbl(x, y)
 	if om == tfx.output.NORMAL or om == tfx.output.COL256 then
 		for j=i, i+7 do
 			tfx.attributes(tfx.color.WHITE, j)
-			print_at(x, y+j, string.format("%02X", j), 2)
+			tfx.printat(x, y+j, string.format("%02X", j), 2)
 			tfx.attributes(tfx.color.WHITE, j+8)
-			print_at(x+3, y+j, string.format("%02X", j+8), 2)
+			tfx.printat(x+3, y+j, string.format("%02X", j+8), 2)
 		end
 		i = 16
 		x = x+6
@@ -193,7 +180,7 @@ function pr_coltbl(x, y)
 			for k=0, 15 do
 				local col = k*12+j+i
 				tfx.attributes(tfx.color.WHITE, col)
-				print_at(x+k*3, y+j, string.format("%02X", col), 2)
+				tfx.printat(x+k*3, y+j, string.format("%02X", col), 2)
 			end
 		end
 		x = x+48
@@ -205,7 +192,7 @@ function pr_coltbl(x, y)
 			for k=0, 1 do
 				local col = k*12+j+i
 				tfx.attributes(tfx.color.WHITE, col)
-				print_at(x+k*3, y+j, string.format("%02X", col), 2)
+				tfx.printat(x+k*3, y+j, string.format("%02X", col), 2)
 			end
 		end
 	end
@@ -214,16 +201,16 @@ end
 function pr_formats(x, y)
 	local fg, bg = tfx.attributes()
 	
-	print_at(x, y, "Normal")
+	tfx.printat(x, y, "Normal")
 	x = x + 7
 	tfx.attributes(fg + tfx.format.BOLD, bg)
-	print_at(x, y, "Bold")
+	tfx.printat(x, y, "Bold")
 	x = x + 5
 	tfx.attributes(fg + tfx.format.UNDERLINE, bg)
-	print_at(x, y, "Under")
+	tfx.printat(x, y, "Under")
 	x = x + 6
 	tfx.attributes(fg + tfx.format.REVERSE, bg)
-	print_at(x, y, "Reverse")
+	tfx.printat(x, y, "Reverse")
 	
 	tfx.attributes(fg, bg)
 end
@@ -276,9 +263,10 @@ ok, err = pcall(function()
 	repeat
 		
 		tfx.clear(tfx.color.WHITE, tfx.color.BLACK)
-		print_at(1, tfx.height(), "press I to select input mode, O to select output mode, Q to quit")
+		tfx.printat(1, tfx.height(), "press I to select input mode, O to select output mode, Q to quit")
 		
-		pr_event(1, 1, evt)
+		tfx.printat(1, 1, _VERSION)
+		pr_event(1, 3, evt)
 		pr_stats(25, 1)
 		pr_formats(1, 10)
 		pr_colors(50, 1, 10)

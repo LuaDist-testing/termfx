@@ -1,0 +1,7 @@
+# CHANGELOG #
+
+## Version 0.4 ##
+
+* removed termfx.utf8 stuff. You should really be using a dedicated lib.
+* added termfx.printat()
+* lua 5.3 beta compatibility

@@ -16,7 +16,9 @@
 #include "lua.h"
 #include "lauxlib.h"
 
-#define _VERSION "0.3"
+#include "mini_utf8.h"
+
+#define _VERSION "0.4"
 
 #define TFXCELL "TfxCell"
 #define TFXBUFFER "TfxBuffer"
@@ -25,9 +27,10 @@
 #if LUA_VERSION_NUM == 501
 #define luaL_newlib(L,funcs) lua_newtable(L); luaL_register(L, NULL, funcs)
 #define luaL_setfuncs(L,funcs,x) luaL_register(L, NULL, funcs)
+#define lua_rawlen(L, i) lua_objlen(L, i)
 #endif
 
-#define maxargs(n) if (lua_gettop(L) > (n)) { return luaL_error(L, "invalid number of arguments."); }
+#define maxargs(L, n) if (lua_gettop(L) > (n)) { return luaL_error(L, "invalid number of arguments."); }
 
 /* userdata for a termbox cell */
 typedef struct tb_cell TfxCell;
@@ -53,17 +56,15 @@ static uint32_t _tfx_getchar(lua_State *L, int index)
 	uint32_t res = 0;
 	int t = lua_type(L, index);
 	if (t == LUA_TNUMBER)
-		res = lua_tonumber(L, index);
+		res = (uint32_t) lua_tointeger(L, index);
 	else if (t == LUA_TSTRING) {
 		const char* str = lua_tostring(L, index);
 		int l = strlen(str);
 		if (l == 1)
 			res = *str;
 		else if (l > 1) {
-			int ul = tb_utf8_char_length(*str);
-			if (ul == l)
-				tb_utf8_char_to_unicode(&res, str);
-			else
+			res = mini_utf8_decode(&str);
+			if (*str != 0)
 				return luaL_argerror(L, index, "invalid char");
 		}
 	} else {
@@ -232,7 +233,7 @@ static int tfx__newindexCell(lua_State *L)
 {
 	TfxCell *tfxcell = tfx_checkCell(L, 1);
 	const char* what = luaL_checkstring(L, 2);
-	uint32_t val = luaL_checkinteger(L, 3);
+	uint32_t val = (uint32_t) luaL_checkinteger(L, 3);
 
 	if (!strcmp(what, "ch"))
 		tfxcell->ch = val;
@@ -261,10 +262,10 @@ static int tfx__newindexCell(lua_State *L)
  */
 static int tfx_newCell(lua_State *L)
 {
-	maxargs(3);
+	maxargs(L, 3);
 	uint32_t ch = _tfx_optchar(L, 1, ' ');
-	uint16_t fg = luaL_optinteger(L, 2, default_fg) & 0xFFFF;
-	uint16_t bg = luaL_optinteger(L, 3, default_bg) & 0xFFFF;
+	uint16_t fg = (uint16_t) luaL_optinteger(L, 2, default_fg) & 0xFFFF;
+	uint16_t bg = (uint16_t) luaL_optinteger(L, 3, default_bg) & 0xFFFF;
 	TfxCell *tfxcell = tfx_pushCell(L);
 	tfxcell->ch = ch;
 	tfxcell->fg = fg;
@@ -383,9 +384,9 @@ static const luaL_Reg tfx_BufferMeta[] = {
  */
 static int tfx_newBuffer(lua_State *L)
 {
-	maxargs(2);
-	int w = luaL_checkinteger(L, 1);
-	int h = luaL_checkinteger(L, 2);
+	maxargs(L, 2);
+	int w = (int) luaL_checkinteger(L, 1);
+	int h = (int) luaL_checkinteger(L, 2);
 	if (w < 1 || h < 1)
 		return luaL_error(L, "buffer dimensions must be >=1");
 	TfxBuffer *tfxbuf = tfx_pushBuffer(L);
@@ -415,11 +416,11 @@ static int tfx_newBuffer(lua_State *L)
  */
 static int tfx_bufAttributes(lua_State *L)
 {
-	maxargs(3);
+	maxargs(L, 3);
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
 	if (lua_gettop(L) > 1) {
-		tfxbuf->fg = luaL_checkinteger(L, 2) & 0xFFFF;
-		tfxbuf->bg = luaL_checkinteger(L, 3) & 0xFFFF;
+		tfxbuf->fg = (uint16_t) luaL_checkinteger(L, 2) & 0xFFFF;
+		tfxbuf->bg = (uint16_t) luaL_checkinteger(L, 3) & 0xFFFF;
 	}
 	lua_pushinteger(L, tfxbuf->fg);
 	lua_pushinteger(L, tfxbuf->bg);
@@ -484,8 +485,8 @@ static int tfx_bufClear(lua_State *L)
 static int tfx_bufSetcell(lua_State *L)
 {
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	uint32_t x = luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t y = luaL_checkinteger(L, 3) - top_left_coord;
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 3) - top_left_coord;
 	
 	if (x >= tfxbuf->w || y >= tfxbuf->h || x < 0 || y < 0)
 		return 0;
@@ -493,16 +494,16 @@ static int tfx_bufSetcell(lua_State *L)
 	uint32_t ch = ' ';
 	uint16_t fg = TB_WHITE, bg = TB_BLACK;
 	if (tfx_isCell(L, 4)) {
-		maxargs(4);
+		maxargs(L, 4);
 		TfxCell *tfxcell = tfx_toCell(L, 4);
 		ch = tfxcell->ch;
 		fg = tfxcell->fg;
 		bg = tfxcell->bg;
 	} else {
-		maxargs(6);
+		maxargs(L, 6);
 		ch = _tfx_optchar(L, 4, ' ');
-		fg = luaL_optinteger(L, 5, tfxbuf->fg) & 0xFFFF;
-		bg = luaL_optinteger(L, 6, tfxbuf->bg) & 0xFFFF;
+		fg = (uint16_t) luaL_optinteger(L, 5, tfxbuf->fg) & 0xFFFF;
+		bg = (uint16_t) luaL_optinteger(L, 6, tfxbuf->bg) & 0xFFFF;
 	}
 	TfxCell *cell = &tfxbuf->buf[y * tfxbuf->w + x];
 	cell->ch = ch;
@@ -538,23 +539,23 @@ static int tfx_bufSetcell(lua_State *L)
 static int tfx_bufRect(lua_State *L)
 {
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	uint32_t x = luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t y = luaL_checkinteger(L, 3) - top_left_coord;
-	uint32_t w = luaL_checkinteger(L, 4);
-	uint32_t h = luaL_checkinteger(L, 5);
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 3) - top_left_coord;
+	uint32_t w = (uint32_t) luaL_checkinteger(L, 4);
+	uint32_t h = (uint32_t) luaL_checkinteger(L, 5);
 	uint32_t ch;
 	uint16_t fg, bg;
 	if (tfx_isCell(L, 6)) {
-		maxargs(6);
+		maxargs(L, 6);
 		TfxCell *tfxcell = tfx_toCell(L, 6);
 		ch = tfxcell->ch;
 		fg = tfxcell->fg;
 		bg = tfxcell->bg;
 	} else {
-		maxargs(8);
+		maxargs(L, 8);
 		ch = _tfx_optchar(L, 6, 0);
-		fg = luaL_optinteger(L, 7, default_fg) & 0xFFFF;
-		bg = luaL_optinteger(L, 8, default_bg) & 0xFFFF;
+		fg = (uint16_t) luaL_optinteger(L, 7, default_fg) & 0xFFFF;
+		bg = (uint16_t) luaL_optinteger(L, 8, default_bg) & 0xFFFF;
 	}
 	int cx, cy;
 	
@@ -585,9 +586,9 @@ static int tfx_bufRect(lua_State *L)
  */
 static int tfx_bufWidth(lua_State *L)
 {
-	maxargs(1);
+	maxargs(L, 1);
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	lua_pushnumber(L, tfxbuf->w);
+	lua_pushinteger(L, tfxbuf->w);
 	return 1;
 }
 
@@ -606,9 +607,9 @@ static int tfx_bufWidth(lua_State *L)
  */
  static int tfx_bufHeight(lua_State *L)
 {
-	maxargs(1);
+	maxargs(L, 1);
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	lua_pushnumber(L, tfxbuf->h);
+	lua_pushinteger(L, tfxbuf->h);
 	return 1;
 }
 
@@ -641,7 +642,7 @@ static const struct luaL_Reg ltfxbuf_methods [] = {
  */
 static int tfx_init(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	default_fg = TB_WHITE;
 	default_bg = TB_BLACK;
 	
@@ -683,7 +684,7 @@ static void _tfx_doShutdown(void)
  */
 static int tfx_shutdown(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	_tfx_doShutdown();
 	return 0;
 }
@@ -703,7 +704,7 @@ static int tfx_shutdown(lua_State *L)
  */
 static int tfx_width(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	int w = tb_width();
 	if (w >= 0)
 		lua_pushinteger(L, w);
@@ -727,7 +728,7 @@ static int tfx_width(lua_State *L)
  */
 static int tfx_height(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	int h = tb_height();
 	if (h >= 0)
 		lua_pushinteger(L, h);
@@ -754,10 +755,10 @@ static int tfx_height(lua_State *L)
  */
 static int tfx_attributes(lua_State *L)
 {
-	maxargs(2);
+	maxargs(L, 2);
 	if (lua_gettop(L) > 0) {
-		default_fg = luaL_checkinteger(L, 1) & 0xFFFF;
-		default_bg = luaL_checkinteger(L, 2) & 0xFFFF;
+		default_fg = (uint16_t) luaL_checkinteger(L, 1) & 0xFFFF;
+		default_bg = (uint16_t) luaL_checkinteger(L, 2) & 0xFFFF;
 		tb_set_clear_attributes(default_fg, default_bg);
 	}
 	lua_pushinteger(L, default_fg);
@@ -805,7 +806,7 @@ static int tfx_clear(lua_State *L)
  */
 static int tfx_present(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	if (initialized) tb_present();
 	return 0;
 }
@@ -826,9 +827,9 @@ static int tfx_present(lua_State *L)
  */
 static int tfx_setCursor(lua_State *L)
 {
-	maxargs(2);
-	uint16_t x = luaL_checkinteger(L, 1) - top_left_coord;
-	uint16_t y = luaL_checkinteger(L, 2) - top_left_coord;
+	maxargs(L, 2);
+	uint16_t x = (uint16_t) luaL_checkinteger(L, 1) - top_left_coord;
+	uint16_t y = (uint16_t) luaL_checkinteger(L, 2) - top_left_coord;
 	if (initialized) tb_set_cursor(x, y);
 	return 0;
 }
@@ -848,7 +849,7 @@ static int tfx_setCursor(lua_State *L)
  */
 static int tfx_hideCursor(lua_State *L)
 {
-	maxargs(0);
+	maxargs(L, 0);
 	if (initialized) tb_set_cursor(TB_HIDE_CURSOR, TB_HIDE_CURSOR);
 	return 0;
 }
@@ -876,17 +877,17 @@ static int tfx_hideCursor(lua_State *L)
  */
 static int tfx_setCell(lua_State *L)
 {
-	uint32_t x = luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = luaL_checkinteger(L, 2) - top_left_coord;
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
 	if (tfx_isCell(L, 3)) {
-		maxargs(3);
+		maxargs(L, 3);
 		const TfxCell *tfxcell = tfx_checkCell(L, 3);
 		if (initialized) tb_put_cell(x, y, tfxcell);
 	} else {
-		maxargs(5);
+		maxargs(L, 5);
 		uint32_t ch = _tfx_optchar(L, 3, ' ');
-		uint16_t fg = luaL_optinteger(L, 4, default_fg) & 0xFFFF;
-		uint16_t bg = luaL_optinteger(L, 5, default_bg) & 0xFFFF;
+		uint16_t fg = (uint16_t) luaL_optinteger(L, 4, default_fg) & 0xFFFF;
+		uint16_t bg = (uint16_t) luaL_optinteger(L, 5, default_bg) & 0xFFFF;
 		if (initialized) tb_change_cell(x, y, ch, fg, bg);
 	}
 	return 0;
@@ -910,9 +911,9 @@ static int tfx_setCell(lua_State *L)
  */
 static int tfx_blit(lua_State *L)
 {
-	maxargs(3);
-	uint32_t x = luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = luaL_checkinteger(L, 2) - top_left_coord;
+	maxargs(L, 3);
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 3);
 	if (initialized) tb_blit(x, y, tfxbuf->w, tfxbuf->h, tfxbuf->buf);
 	return 0;
@@ -943,23 +944,23 @@ static int tfx_blit(lua_State *L)
  */
 static int tfx_rect(lua_State *L)
 {
-	uint32_t x = luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t w = luaL_checkinteger(L, 3);
-	uint32_t h = luaL_checkinteger(L, 4);
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	uint32_t w = (uint32_t) luaL_checkinteger(L, 3);
+	uint32_t h = (uint32_t) luaL_checkinteger(L, 4);
 	uint32_t ch;
 	uint16_t fg, bg;
 	if (tfx_isCell(L, 5)) {
-		maxargs(5);
+		maxargs(L, 5);
 		TfxCell *tfxcell = tfx_toCell(L, 5);
 		ch = tfxcell->ch;
 		fg = tfxcell->fg;
 		bg = tfxcell->bg;
 	} else {
-		maxargs(7);
+		maxargs(L, 7);
 		ch = _tfx_optchar(L, 5, 0);
-		fg = luaL_optinteger(L, 6, default_fg) & 0xFFFF;
-		bg = luaL_optinteger(L, 7, default_bg) & 0xFFFF;
+		fg = (uint16_t) luaL_optinteger(L, 6, default_fg) & 0xFFFF;
+		bg = (uint16_t) luaL_optinteger(L, 7, default_bg) & 0xFFFF;
 	}
 	int cx, cy;
 	
@@ -992,10 +993,10 @@ static int tfx_rect(lua_State *L)
  */
 static int tfx_inputMode(lua_State *L)
 {
-	maxargs(1);
+	maxargs(L, 1);
 	int mode = TB_INPUT_CURRENT;
 	if (!lua_isnoneornil(L, 1))
-		mode = luaL_checkinteger(L, 1);
+		mode = (int) luaL_checkinteger(L, 1);
 	int res = tb_select_input_mode(mode);
 	lua_pushinteger(L, res);
 	return 1;
@@ -1016,10 +1017,10 @@ static int tfx_inputMode(lua_State *L)
  */
 static int tfx_outputMode(lua_State *L)
 {
-	maxargs(1);
+	maxargs(L, 1);
 	int mode = TB_OUTPUT_CURRENT;
 	if (!lua_isnoneornil(L, 1))
-		mode = luaL_checkinteger(L, 1);
+		mode = (int) luaL_checkinteger(L, 1);
 	int res = tb_select_output_mode(mode);
 	lua_pushinteger(L, res);
 	return 1;
@@ -1040,11 +1041,11 @@ static int tfx_outputMode(lua_State *L)
  */
 static int tfx_pollEvent(lua_State *L)
 {
-	maxargs(1);
+	maxargs(L, 1);
 	struct tb_event evt;
 	int eno = 0;
 	if (lua_gettop(L) == 1) {
-		int timeout = luaL_checkinteger(L, 1);
+		int timeout = (int) luaL_checkinteger(L, 1);
 		eno = initialized ? tb_peek_event(&evt, timeout) : 0;
 	} else
 		eno = initialized ? tb_poll_event(&evt) : 0;
@@ -1082,7 +1083,7 @@ static int tfx_pollEvent(lua_State *L)
 			if (evt.ch < 256)
 				c[0] = evt.ch;
 			else
-				tb_utf8_unicode_to_char(c, evt.ch);
+				mini_utf8_encode(evt.ch, c, 10);
 			lua_pushstring(L, c);
 			lua_rawset(L, -3);
 			
@@ -1100,6 +1101,64 @@ static int tfx_pollEvent(lua_State *L)
 	return 1;
 }
 
+/* tfx_printAt
+ *
+ * prints some text to the terminal with top left position at x, y
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack:
+ *	1	x coordinate of text
+ * 	2	y coordinate of text
+ * 	3	text (string or table of chars)
+ * 	4	(opt) maximum width to print
+ *
+ * Lua Returns:
+ *	-
+ */
+static int tfx_printAt(lua_State *L)
+{
+	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
+	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	int pw = -1;
+	if (lua_gettop(L) == 4)
+		pw = (int) luaL_checkinteger(L, 4);
+	
+	if (lua_type(L, 3) == LUA_TTABLE) {
+		int i = 1;
+		int w = 0;
+		if (pw < 0) {
+			pw = lua_rawlen(L, 3);
+		}
+		lua_rawgeti(L, 3, i);
+		while (!lua_isnil(L, -1) && w < pw && x + w < tb_width()) {
+			TfxCell *c = tfx_toCell(L, -1);
+			if (c)
+				tb_put_cell(x + w, y, c);
+			++w;
+			++i;
+			lua_rawgeti(L, 3, i);
+		}
+	} else if (!lua_isnil(L, 3)) {
+		const char* str = luaL_checkstring(L, 3);
+		int isutf8 = mini_utf8_check_encoding(str) == 0;
+		int w = 0;
+		if (pw < 0) {
+			pw = isutf8 ? mini_utf8_strlen(str) : strlen(str);
+		}
+		struct tb_cell c;
+		c.fg = default_fg;
+		c.bg = default_bg;
+		c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+		
+		for (w = 0; c.ch && (w < pw) && (x + w < tb_width()); ++w) {
+			tb_put_cell(x + w, y, &c);
+			c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+		}
+	}
+	return 0;
+}
 
 /* TermFX function list
  */
@@ -1121,100 +1180,11 @@ static const struct luaL_Reg ltermbox [] ={
 	{"inputmode", tfx_inputMode},
 	{"outputmode", tfx_outputMode},
 	{"pollevent", tfx_pollEvent},
+	{"printat", tfx_printAt},
 	
 	{NULL, NULL}
 };
 
-/*** unicode stuff ***/
-
-/* tfx_charLength
- *
- * returns the length in bytes of the first char in the argument string
- *
- * Arguments:
- *	L	Lua State
- *
- * Lua Stack:
- *	1	string
- *
- * Lua Returns:
- *	+1	length in bytes of the first char
- */
-static int tfx_charLength(lua_State *L)
-{
-	maxargs(1);
-	const char* str =  luaL_checkstring(L, 1);
-	int len = tb_utf8_char_length(*str);
-	if (len >= 0)
-		lua_pushinteger(L, len);
-	else
-		lua_pushnil(L);
-	return 1;
-}
-
-/* tfx_charToUnicode
- *
- * converts the first char of the argument string to an int
- *
- * Arguments:
- *	L	Lua State
- *
- * Lua Stack:
- *	1	string
- *
- * Lua Returns:
- *	+1	unicode value of the first char
- */
-static int tfx_charToUnicode(lua_State *L)
-{
-	maxargs(1);
-	const char* str =  luaL_checkstring(L, 1);
-	uint32_t out;
-	int ok = tb_utf8_char_to_unicode(&out, str);
-	if (ok >= 0)
-		lua_pushinteger(L, out);
-	else
-		lua_pushnil(L);
-	return 1;
-}
-
-/* tfx_unicodeToChar
- *
- * converts the unicode value to a string containing utf8 encoded
- * unicode char
- *
- * Arguments:
- *	L	Lua State
- *
- * Lua Stack:
- *	1	unicode value
- *
- * Lua Returns:
- *	+1	string containing utf8 encoded unicode char
- */
-static int tfx_unicodeToChar(lua_State *L)
-{
-	maxargs(1);
-	char str[10];
-	memset(str, 0, 10);
-	uint32_t c = luaL_checkinteger(L, 1);
-	int ok = tb_utf8_unicode_to_char(str, c);
-	if (ok >= 0)
-		lua_pushstring(L, str);
-	else
-		lua_pushnil(L);
-	return 1;
-}
-
-/* TermFX unicode helper function list
- */
-static const struct luaL_Reg ltermbox_utf8 [] = {
-	{"charlength", tfx_charLength},
-	{"char2unicode", tfx_charToUnicode},
-	{"unicode2char", tfx_unicodeToChar},
-	
-	{NULL,NULL}
-};
 
 /* helper: __index metamethod for the table containing the color values
  * for the predefined color names. As the values for these names are not
@@ -1264,7 +1234,7 @@ static int tfx__indexColor(lua_State *L)
 	if (col < 0)
 		lua_pushnil(L);
 	else
-		lua_pushnumber(L, col);
+		lua_pushinteger(L, col);
 
 	return 1;
 }
@@ -1272,7 +1242,7 @@ static int tfx__indexColor(lua_State *L)
 /* add constants */
 #define ADDCONST(n, v) \
 	lua_pushliteral(L, n); \
-	lua_pushnumber(L, v); \
+	lua_pushinteger(L, v); \
 	lua_rawset(L, -3)
 
 static void tfx_addconstants(lua_State *L)
@@ -1388,10 +1358,6 @@ int luaopen_termfx(lua_State *L)
 {
 	luaL_newlib(L, ltermbox);
 	
-	lua_pushliteral(L, "utf8");
-	luaL_newlib(L, ltermbox_utf8);
-	lua_rawset(L, -3);
-
 	tfx_addconstants(L);
 
 	lua_pushliteral(L, "_VERSION");

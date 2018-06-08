@@ -204,7 +204,7 @@ into a pcall()ed function, like so:
 :	either the field `key` or the field `ch` is 0. If the `key` field is
 	not 0, it can be checked against one of the constants in `termfx.key`.
 	If the `ch` field is not 0, it is the unicode value of the char that
-	was pressed on the keyboard. In that case, the `char` field will
+	was 	pressed on the keyboard. In that case, the `char` field will
 	contain a string containing the character represented by `ch`.
 	
 :	For the event `"resize"`:
