@@ -1,15 +1,15 @@
 -- This file was automatically generated for the LuaDist project.
 
 package = "termfx"
-version = "0.4-1"
+version = "0.5-1"
 -- LuaDist source
 source = {
-  tag = "0.4-1",
+  tag = "0.5-1",
   url = "git://github.com/LuaDist-testing/termfx.git"
 }
 -- Original source
 -- source = {
--- 	url = "http://www.tset.de/downloads/termfx-0.4-1.tar.gz"
+-- 	url = "http://www.tset.de/downloads/termfx-0.5-1.tar.gz"
 -- }
 description = {
 	summary = "A library for fancy terminal output based on termbox.",

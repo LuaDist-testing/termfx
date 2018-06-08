@@ -10,7 +10,7 @@ Released under MIT/X11 license. See file LICENSE for details.
 TermFX is a library for fancy terminal output based on termbox. It means
 to reduce the weirdness termbox has in places, and provide some additional
 utilities like offscreen buffers, and generally a more lua like interface.
-TermFX has been tested with lua 5.1 and 5.2 on Linux and Mac OS X.
+TermFX has been tested with lua 5.1 to 5.3 beta on Linux and Mac OS X.
 
 Basic usage is very similar to termbox, but also different enough that it
 warrants some of its own documentation.
@@ -21,7 +21,7 @@ of these see `termfx.attribute()`. Unlike termbox, the top left coordinate
 is 1, 1, and named colors work in all output modes.
 
 All rendering is done into a buffer, whose contents is then drawn to the
-actual display using the function `termfx.display()`. In the following
+actual display using the function `termfx.present()`. In the following
 discussion of the functions, when I write that something operates on the
 terminal, it actually operates on this buffer.
 
@@ -76,35 +76,44 @@ longer see any error messages the program might throw. It is therefore
 recommended that, at least during development, you wrap your main loop
 into a pcall()ed function, like so:
 
-	tfx.init()
+	termfx.init()
     ...
     ok, err = pcall(function()
 		repeat
-			evt = tfx.pollevent()
+			evt = termfx.pollevent()
 			...
 		until some_exit_condition
     end)
-    tfx.shutdown()
+    termfx.shutdown()
+    if not ok then print("Error: "..err) end
 
 ### Functions ###
 
 #### Main functions ####
 
 `termfx.init()`
-:	initializes the library and the display.  
-	`termfx.init()` may fail and in that case throws an error.
+:	initializes the library and the display. `termfx.init()` may fail
+	and in that case throws an error.
+
+:	all of the other functions, except for buffer and cell constructors
+	and methods, work only after the terminal has been initialized using
+	this function, and will silently fail, or in the case of queries
+	return nil, if that is not the case. Because of this, you can for
+	example check whether the terminal has been initialized by querying
+	its width and checking the result against nil.
 
 `termfx.shutdown()`
 :	shuts the library down and puts the terminal into a sane mode for
 	normal usage.
 
 `w = termfx.width()`
-:	returns the width of the terminal, or nil if called before
-	`termfx.init()` or after `termfx.shutdown()`.
+:	returns the width of the terminal.
 
 `h = termfx.height()`
-:	returns the height of the terminal, or nil if called before
-	`termfx.init()` or after `termfx.shutdown()`.
+:	returns the height of the terminal.
+
+`w, h = termfx.size()`
+:	returns width and height of the terminal.
 
 `termfx.clear([fg, bg])`
 :	clears the terminal. If no arguments are given, the default
@@ -121,6 +130,35 @@ into a pcall()ed function, like so:
 	constants can be added together for the final foreground or
 	background attribute. Returns the default foreground and background
 	attributes, or those just set.
+
+`col = termfx.rgb2color(r, g, b)`
+:	maps a set of rgb values to a xterm color number. r, g, b must be in
+	the range 0..5, which makes up the 216 available colors. Returns a
+	color number, which is corrected for the output mode in use, or nil
+	if the input could not be mapped to a color number. This function
+	only works in `termfx.output.COL216` and `termfx.output.COL256`
+	modes, in the other modes it will always return nil.
+
+`col = termfx.grey2color(v)`
+:	maps a single greyscale value to an xterm color number. v must be in
+	the range 0..25, which makes for 26 grey values. Returns a color
+	number, which is corrected for the output mode in use, or nil if the
+	input could not be mapped to a color number. This function only
+	works in `termfx.output.COL256` and `termfx.output.GREYSCALE` modes,
+	in the other modes it will always return nil. Also, as in
+	`tfx.output.GREYSCALE` mode there are only 24 available grey values,
+	the values 0 and 1 map to the same color number, as do 24 and 25.
+
+`value, r, g, b = termfx.colorinfo(n)`
+:	returns the color value (a rgb string with format "#abcdef") and
+	red, green and blue values for a color number. The range of n
+	depends on the current output mode:
+		* 0..255 for `termfx.output.COL256`
+		* 0..215 for `termfx.output.COL216`
+		* 0..23 for `termfx.output.GREYSCALE`
+		* 0..15 for `termfx.output.NORMAL`
+	For values outside of the valid range for the current output mode,
+	the function will return nil.
 
 `termfx.present()`
 :	output the contents of TermFX's back buffer, into which the
@@ -167,6 +205,13 @@ into a pcall()ed function, like so:
 	terminal, otherwise the respective values default to space (' ') for
 	the char, and the default foreground and background attributes.
 
+`termfx.printat(x, y, what [, w])`
+:	prints a string to the terminal at position x, y up to maximum width
+	w. If w is omitted, it defaults to the length of what. what can be a
+	string, or a table of cells. If it is a string, it is printed in the
+	default foreground and background colors, if it is a table of cells,
+	the char and attributes from each cell are used.
+
 `mode = termfx.inputmode([newmode])`
 :	sets the terminal input mode. Valid modes are `termfx.input.ESC`,
 	`termfx.input.ALT`. If the newmode argument was not given, returns
@@ -183,19 +228,21 @@ into a pcall()ed function, like so:
 `mode = termfx.outputmode([newmode])`
 :	sets the terminal output mode. See the section on colors and
 	attributes below. If the newmode argument was not given, returns the
-	current input mode, otherwise returns the mode just set.
+	current output mode, otherwise returns the mode just set.
 
 `evt = termfx.pollevent([timeout])`
 :	waits for an event to occur. If the timeout argument is given, the
 	function will time out after timeout milliseconds, otherwise it will
-	wait forever. On Timeout, the function returns nil, otherwise it
-	returns a table with information about the event. Known events are
-	`"key"` for a keyboard event or `"resize"` if the terminal was resized.
-	Depending on which event occurred, the result table looks like this:
-	
+	wait forever. On Timeout, the function returns nil, on error it
+	returns nil+error message, otherwise it returns a table with
+	information about the event. Known events are `"key"` for a keyboard
+	event or `"resize"` if the terminal was resized. Depending on which
+	event occurred, the result table looks like this:
+
 :	For the event `"key"`:
 
 :	* `type`: `"key"`
+	* `elapsed`: the number of milliseconds spent in `termfx.pollevent()`
 	* `mod`: `nil` or `"ALT"`, no other modifiers are returned
 	* `key`: the numeric code of the key pressed, if it was a special key
 	* `ch`: the numeric code of the key pressed for standard keys
@@ -210,15 +257,9 @@ into a pcall()ed function, like so:
 :	For the event `"resize"`:
 
 :	* `type`: `"resize"`
+	* `elapsed`: the number of milliseconds spent in `termfx.pollevent()`
 	* `w`: the new width
 	* `h`: the new height
-
-`tfx.printat(x, y, what [, w])`
-:	prints a string to the terminal at position x, y up to matimum width
-	w. If w is omitted, it defaults to the length of what. what can be a
-	string, or a table of cells. If it is a string, it is printed in the
-	default foreground and background colors, if it is a table of cells,
-	the char and attributes from each cell are used.
 
 #### Buffer methods ####
 
@@ -236,8 +277,14 @@ individual methods see above.
 `buf:setcell(x, y [, cel]) or buf:setcell(x, y [, ch [, fg [, bg]]])`
 :	set a cell in the buffer
 
+`buf:blit(x, y, src)`
+:	blits the contents of the buffer src to position x, y of buffer buf.
+
 `buf:rect(x, y, w, h [, cel]) or ok = buf:rect(x, y, w, h [, ch [, fg [, bg]]])`
 :	draw a rectangle in the buffer
+
+`buf:printat(x, y, what [, w])`
+:	print a string to the buffer
 
 `w = buf:width()`
 :	return the buffer width
@@ -245,10 +292,19 @@ individual methods see above.
 `h = buf:height()`
 :	return the buffer height
 
+`w, h = buf:size()`
+:	return the buffer width and height
+
 ### Colors and attributes ###
 
-How TermFX handles colors depends on the chosen output mode. There are 8
-predefined colors, which are available in all output modes:
+How TermFX handles colors depends on the chosen output mode. There are a
+few functions to help you with the colors, these are `termfx.rgb2color()`,
+`termfx.grey2color()`and `termfx.colorinfo()`, see the function list
+above for an explanation of those functions. They work based on the
+standard xterm colormap. If, for some reason, you have a different
+colormap, these functions will not give you the results you want.
+
+There are 8 predefined colors, which are available in all output modes:
 
 * `termfx.color.BLACK`
 * `termfx.color.RED`
@@ -289,8 +345,9 @@ A table of the colors available for xterms is available here:
 The behaviour of the predefined colors is different from termbox, where
 they only make sense for the `NORMAL` output mode. But this means that
 they need to be determined for each output mode, which means that when
-you for some reason cache the values from `termfx.color`, and then switch
-output modes, you will need to re-cache them, as they will have changed.
+you for some reason cache the values from `termfx.color` or use them in
+a buffer or a cell, and then switch output modes, you will need to
+re-cache them, as they will have changed.
 
 In addition to colors, cells can also have formatting attributes:
 

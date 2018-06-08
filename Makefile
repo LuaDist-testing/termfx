@@ -12,6 +12,8 @@ LUAVERSION = $(shell lua -e "print(string.match(_VERSION, '%d+%.%d+'))")
 LUA_BINDIR ?= $(shell dirname `which lua`)
 LUAROOT = $(shell dirname $(LUA_BINDIR))
 
+OBJS = termfx.o termfx_color.o
+
 TARGET = termfx.so
 
 CC ?= gcc
@@ -42,10 +44,10 @@ INST_LUADIR ?= $(INST_DIR)/share/lua/$(LUAVERSION)
 
 all: $(TARGET)
 
-$(TARGET): termfx.o libtermbox.a
-	$(CC) $(CLDFLAGS) -o $@ -L$(LUA_LIBDIR) $< -L. -ltermbox
+$(TARGET): $(OBJS) libtermbox.a
+	$(CC) $(CLDFLAGS) -o $@ -L$(LUA_LIBDIR) $(OBJS) -L. -ltermbox
 
-termfx.o: termfx.c termbox.h
+%.o: %.c termbox.h termfx.h
 	$(CC) $(CCFLAGS) -I$(LUA_INCDIR) -c $< -o $@
 
 $(TERMBOX):

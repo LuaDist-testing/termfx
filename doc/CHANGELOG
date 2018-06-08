@@ -1,7 +1,22 @@
 # CHANGELOG #
 
+## Version 0.5 ##
+
+* added termfx.rgb2color(), termfx.grey2color() and termfx.colorinfo()
+* added buf:printat() and buf:blit() methods
+* added termfx.size() and buf:size()
+* added elapsed field to event table returned from termfx.pollevent()
+* made termfx.pollevent accept nil as timeout value, treating it as if
+  none were given.
+* more samples
+* fixed incredibly stupid bug :(
+
 ## Version 0.4 ##
 
 * removed termfx.utf8 stuff. You should really be using a dedicated lib.
 * added termfx.printat()
 * lua 5.3 beta compatibility
+
+## Version 0.3 ##
+
+* initial release

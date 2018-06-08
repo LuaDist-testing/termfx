@@ -1,113 +1,44 @@
+-- sample for termfx
+-- Gunnar Zötl <gz@tset.de>, 2014
+-- Released under MIT/X11 license. See file LICENSE for details.
+
+package.path = "samples/?.lua;"..package.path
+
 tfx = require "termfx"
+ui = require "simpleui"
 
 tfx.init()
 tfx.inputmode(tfx.input.ALT)
 tfx.outputmode(tfx.output.COL256)
-
-function draw_box(x, y, w, h)
-	local ccell = tfx.newcell('+')
-	local hcell = tfx.newcell('-')
-	local vcell = tfx.newcell('|')
-
-	for i = x, x+w do
-		tfx.setcell(i, y-1, hcell)
-		tfx.setcell(i, y+h, hcell)
-	end
-	for i = y, y+h do
-		tfx.setcell(x-1, i, vcell)
-		tfx.setcell(x+w, i, vcell)
-	end
-	tfx.setcell(x-1, y-1, ccell)
-	tfx.setcell(x-1, y+h, ccell)
-	tfx.setcell(x+w, y-1, ccell)
-	tfx.setcell(x+w, y+h, ccell)
-	
-	tfx.rect(x, y, w, h, ' ', fg, bg)
-end
-
-function box(w, h)
-	local tw, th = tfx.width(), tfx.height()
-	if w + 2 > tw then w = tw - 2 end
-	if h + 2 > th then h = th - 2 end
-	local x = math.floor((tw - w) / 2)
-	local y = math.floor((th - h) / 2)
-	
-	draw_box(x, y, w, h)
-	
-	return x, y, w, h
-end
-
-function ask(msg)
-	local mw = #msg
-	if mw < 6 then mw = 6 end
-	local x, y, w, h = box(mw, 3)
-	tfx.printat(x, y, msg, w)
-	local p = x + math.floor((w - 6) / 2)
-	tfx.attributes(tfx.color.BLACK, tfx.color.GREEN)
-	tfx.printat(p, y+2, "Yes")
-	tfx.attributes(tfx.color.BLACK, tfx.color.RED)
-	tfx.printat(p+4, y+2, "No")
-	tfx.present()
-	
-	local answer = nil
-	while answer == nil do
-		local evt = tfx.pollevent()
-		if evt.char == 'y' or evt.char == 'Y' then
-			answer = true
-		elseif evt.char == 'n' or evt.char == 'N' then
-			answer = false
-		end
-	end
-	return answer
-end
-
-function select(msg, tbl)
-	local mw = #msg
-	local mh = #tbl
-	if mh > 9 then mh = 9 end
-	for i=1, mh do
-		if mw < #tbl[i] + 2 then mw = #tbl[i] + 2 end
-	end
-
-	local x, y, w, h = box(mw, mh+2)
-	tfx.printat(x, y, msg, w)
-	for i=1, mh do
-		tfx.printat(x, y+1+i, i.." "..tbl[i])
-	end
-	tfx.present()
-	
-	local answer = nil
-	while answer == nil do
-		local evt = tfx.pollevent()
-		if evt.char >= '1' and evt.char <= tostring(mh) then
-			answer = tbl[tonumber(evt.char)]
-		end
-	end
-	return answer
-end
 
 function pr_event(x, y, evt)
 	evt = evt or {}
 
 	tfx.attributes(tfx.color.BLUE, tfx.color.WHITE)
 	tfx.printat(x, y, "Event:")
-	tfx.printat(x+7, y, evt.type)
+	tfx.printat(x+9, y, evt.type)
 	
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLACK)
+
+	if evt and evt.type then
+		tfx.printat(x, y+1, "elapsed")
+		tfx.printat(x+8, y+1, evt.elapsed)
+	end
+	
 	if evt.type == "key" then
-		tfx.printat(x, y+1, "mod")
-		tfx.printat(x+7, y+1, evt.mod)
-		tfx.printat(x, y+2, "key")
-		tfx.printat(x+7, y+2, evt.key)
-		tfx.printat(x, y+3, "ch")
-		tfx.printat(x+7, y+3, evt.ch)
-		tfx.printat(x, y+4, "char")
-		tfx.printat(x+7, y+4, evt.char)
+		tfx.printat(x, y+2, "mod")
+		tfx.printat(x+8, y+2, evt.mod)
+		tfx.printat(x, y+3, "key")
+		tfx.printat(x+8, y+3, evt.key)
+		tfx.printat(x, y+4, "ch")
+		tfx.printat(x+8, y+4, evt.ch)
+		tfx.printat(x, y+5, "char")
+		tfx.printat(x+8, y+5, evt.char)
 	elseif evt.type == "resize" then
-		tfx.printat(x, y+1, "w")
-		tfx.printat(x+7, y+1, evt.w)
-		tfx.printat(x, y+2, "h")
-		tfx.printat(x+7, y+2, evt.h)
+		tfx.printat(x, y+2, "w")
+		tfx.printat(x+8, y+2, evt.w)
+		tfx.printat(x, y+3, "h")
+		tfx.printat(x+8, y+3, evt.h)
 	end
 end
 
@@ -147,7 +78,7 @@ function tbl_keys(tbl)
 end
 
 function pr_stats(x, y)
-	local tw, th = tfx.width(), tfx.height()
+	local tw, th = tfx.size()
 	local im = tfx.inputmode()
 	local om = tfx.outputmode()
 	
@@ -217,7 +148,7 @@ end
 
 function blit_a_bit(x, y, w, h)
 	tfx.attributes(tfx.color.WHITE, tfx.color.BLACK)
-	draw_box(x, y, w, h)
+	ui.box(x, y, w, h)
 	
 	local buf = tfx.newbuffer(8, 6)
 	buf:clear(tfx.color.WHITE, tfx.color.BLACK)
@@ -236,9 +167,7 @@ function blit_a_bit(x, y, w, h)
 	buf:setcell(6, 3, eye)
 	buf:setcell(2, 4, mouth)
 	buf:setcell(7, 4, mouth)
-	for i=3, 6 do
-		buf:setcell(i, 5, mouth)
-	end
+	buf:printat(3, 5, { mouth, mouth, mouth, mouth})
 	
 	tfx.blit(x, y, buf)
 	tfx.blit(x+w-8, y+6, buf)
@@ -247,13 +176,13 @@ function blit_a_bit(x, y, w, h)
 end
 
 function select_inputmode()
-	local which = select("select input mode", tbl_keys(tfx.input))
-	tfx.inputmode(tfx.input[which])
+	local which = ui.select("select input mode", tbl_keys(tfx.input))
+	if which then tfx.inputmode(tfx.input[which]) end
 end
 
 function select_outputmode()
-	local which = select("select output mode", tbl_keys(tfx.output))
-	tfx.outputmode(tfx.output[which])
+	local which = ui.select("select output mode", tbl_keys(tfx.output))
+	if which then tfx.outputmode(tfx.output[which]) end
 end
 
 ok, err = pcall(function()
@@ -278,7 +207,7 @@ ok, err = pcall(function()
 		
 		tfx.attributes(tfx.color.WHITE, tfx.color.BLUE)
 		if evt.char == "q" or evt.char == "Q" then
-			quit = ask("Really quit?")
+			quit = ui.ask("Really quit?")
 		elseif evt.char == "i" or evt.char == "I" then
 			select_inputmode()
 		elseif evt.char == "o" or evt.char == "O" then

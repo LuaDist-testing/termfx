@@ -11,26 +11,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/time.h>
 
-#include "termbox.h"
 #include "lua.h"
 #include "lauxlib.h"
 
 #include "mini_utf8.h"
 
-#define _VERSION "0.4"
-
-#define TFXCELL "TfxCell"
-#define TFXBUFFER "TfxBuffer"
-#define TOSTRING_BUFSIZ 64
-
-#if LUA_VERSION_NUM == 501
-#define luaL_newlib(L,funcs) lua_newtable(L); luaL_register(L, NULL, funcs)
-#define luaL_setfuncs(L,funcs,x) luaL_register(L, NULL, funcs)
-#define lua_rawlen(L, i) lua_objlen(L, i)
-#endif
-
-#define maxargs(L, n) if (lua_gettop(L) > (n)) { return luaL_error(L, "invalid number of arguments."); }
+#include "termbox.h"
+#include "termfx.h"
 
 /* userdata for a termbox cell */
 typedef struct tb_cell TfxCell;
@@ -45,6 +34,8 @@ typedef struct {
 static const int top_left_coord = 1;
 static uint16_t default_fg, default_bg;
 static int initialized = 0;
+
+static uint64_t mstimer_tm0 = 0;
 
 /* helper: try to get a char from the stack at index. If the value there
  * is a number, return it. If the value is a string of length 1, return
@@ -83,6 +74,40 @@ static uint32_t _tfx_optchar(lua_State *L, int index, uint32_t dfl)
 	return dfl;
 }
 
+/* helper: check whether the value of the given index on the lua stack
+ * is a userdata of the given type. Return 1 for yes, 0 for no.
+ */
+static int _tfx_isUserdataOfType(lua_State *L, int index, const char* type)
+{
+	if (lua_isuserdata(L, index)) {
+		if (lua_getmetatable(L, index)) {
+			luaL_getmetatable(L, type);
+			if (lua_rawequal(L, -1, -2)) {
+				lua_pop(L, 2);
+				return 1;
+			}
+			lua_pop(L, 2);
+		}
+	}
+	return 0;
+}
+
+/* helper: return a millisecond timer, which is 0 at the load time of
+ * the library, so that the result will fit into an int for some time (a
+ * little more than 49 days)
+ */
+static int _tfx_getMsTimer(void)
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	uint64_t tm = tv.tv_sec * 1000 + tv.tv_usec / 1000 - mstimer_tm0;
+	if (tm > INT_MAX) {
+		mstimer_tm0 += INT_MAX;
+		tm -= INT_MAX;
+	}
+	return (int) tm;
+}
+
 /*** TfxCell Userdata handling ***/
 
 /* tfx_isCell
@@ -96,17 +121,7 @@ static uint32_t _tfx_optchar(lua_State *L, int index, uint32_t dfl)
  */
 static int tfx_isCell(lua_State *L, int index)
 {
-	if (lua_isuserdata(L, index)) {
-		if (lua_getmetatable(L, index)) {
-			luaL_getmetatable(L, TFXCELL);
-			if (lua_rawequal(L, -1, -2)) {
-				lua_pop(L, 2);
-				return 1;
-			}
-			lua_pop(L, 2);
-		}
-	}
-	return 0;
+	return _tfx_isUserdataOfType(L, index, TFXCELL);
 }
 
 /* tfx_toCell
@@ -279,10 +294,24 @@ static const luaL_Reg tfx_CellMeta[] = {
 	{"__tostring", tfx__tostringCell},
 	{"__index",  tfx__indexCell},
 	{"__newindex", tfx__newindexCell},
-	{0, 0}
+	{NULL, NULL}
 };
 
 /*** TfxBuffer Userdata handling ***/
+
+/* tfx_isBuffer
+ *
+ * If the value at the given acceptable index is a full userdata of the
+ * type TFXBUFFER, then return 1, else return 0.
+ *
+ * Arguments:
+ * 	L	Lua State
+ *	index	stack index where the userdata is expected
+ */
+static int tfx_isBuffer(lua_State *L, int index)
+{
+	return _tfx_isUserdataOfType(L, index, TFXBUFFER);
+}
 
 /* tfx_checkBuffer
  *
@@ -365,7 +394,7 @@ static int tfx__tostringBuffer(lua_State *L)
 static const luaL_Reg tfx_BufferMeta[] = {
 	{"__gc", tfx__gcBuffer},
 	{"__tostring", tfx__tostringBuffer},
-	{0, 0}
+	{NULL, NULL}
 };
 
 /* tfx_newBuffer
@@ -460,6 +489,20 @@ static int tfx_bufClear(lua_State *L)
 	return 0;
 }
 
+/* _tfx_bufChangeCell
+ * 
+ * analog to tb_changecell() for buffers
+ */
+static int _tfx_bufChangeCell(TfxBuffer *tfxbuf, int x, int y, TfxCell *c)
+{
+	if (x > tfxbuf->w || y > tfxbuf->h || x < 0 || y < 0)
+		return 0;
+	
+	TfxCell *cell = &tfxbuf->buf[y * tfxbuf->w + x];
+	*cell = *c;
+	return 1;
+}
+
 /* tfx_bufSetcell
  *
  * sets a cell in a buffer. Either uses the default values for foreground
@@ -485,11 +528,8 @@ static int tfx_bufClear(lua_State *L)
 static int tfx_bufSetcell(lua_State *L)
 {
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 3) - top_left_coord;
-	
-	if (x >= tfxbuf->w || y >= tfxbuf->h || x < 0 || y < 0)
-		return 0;
+	int x = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
 	
 	uint32_t ch = ' ';
 	uint16_t fg = TB_WHITE, bg = TB_BLACK;
@@ -505,71 +545,73 @@ static int tfx_bufSetcell(lua_State *L)
 		fg = (uint16_t) luaL_optinteger(L, 5, tfxbuf->fg) & 0xFFFF;
 		bg = (uint16_t) luaL_optinteger(L, 6, tfxbuf->bg) & 0xFFFF;
 	}
-	TfxCell *cell = &tfxbuf->buf[y * tfxbuf->w + x];
-	cell->ch = ch;
-	cell->fg = fg;
-	cell->bg = bg;
+	TfxCell cell;
+	cell.ch = ch;
+	cell.fg = fg;
+	cell.bg = bg;
+	
+	_tfx_bufChangeCell(tfxbuf, x, y, &cell);
 	return 0;
 }
 
-/* tfx_bufRect
+/* tfx_bufBlit
  *
- * draws a rectangle in a buffer. Either uses the default values for
- * foreground and background, or the values passed on the lua stack.
- * 
+ * blits the contents of a buffer to another buffer. Just a modified
+ * copy of my improved tb_blit() routine.
+ *
  * Arguments:
  *	L	Lua State
  *
  * Lua Stack:
- *	1	TfxBuffer userdata
- * 	2	x coordinate of rect
- * 	3	y coordinate of rect
- * 	4	width of rect
- * 	5	height of rect
- * either
- * 	6	TfxCell
- * or
- * 	6	(opt) char, defaults to ' '
- * 	7	(opt) foreground attributes, defaults to buffer default foreground
- * 	8	(opt) background attributes, defaults to buffer default background
+ * 	1	destination TfxBuffer
+ * 	2	x coordinate of cell
+ * 	3	y coordinate of cell
+ * 	4	source TfxBuffer
  *
  * Lua Returns:
- *	false if the rectangle was entirely outside of the buffer, true if not
+ *	-
  */
-static int tfx_bufRect(lua_State *L)
+static int tfx_bufBlit(lua_State *L)
 {
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 3) - top_left_coord;
-	uint32_t w = (uint32_t) luaL_checkinteger(L, 4);
-	uint32_t h = (uint32_t) luaL_checkinteger(L, 5);
-	uint32_t ch;
-	uint16_t fg, bg;
-	if (tfx_isCell(L, 6)) {
-		maxargs(L, 6);
-		TfxCell *tfxcell = tfx_toCell(L, 6);
-		ch = tfxcell->ch;
-		fg = tfxcell->fg;
-		bg = tfxcell->bg;
-	} else {
-		maxargs(L, 8);
-		ch = _tfx_optchar(L, 6, 0);
-		fg = (uint16_t) luaL_optinteger(L, 7, default_fg) & 0xFFFF;
-		bg = (uint16_t) luaL_optinteger(L, 8, default_bg) & 0xFFFF;
+	int x = (int) luaL_checkinteger(L, 2) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 3) - top_left_coord;
+	TfxBuffer *other = tfx_checkBuffer(L, 4);
+
+	if (x + other->w < 0 || x >= tfxbuf->w)
+		return 0;
+	if (y + other->h < 0 || y >= tfxbuf->h)
+		return 0;
+	int xo = 0, yo = 0, ww = other->w, hh = other->h;
+	if (x < 0) {
+		xo = -x;
+		ww -= xo;
+		x = 0;
 	}
-	int cx, cy;
+	if (y < 0) {
+		yo = -y;
+		hh -= yo;
+		y = 0;
+	}
+	if (ww > tfxbuf->w - x)
+		ww = tfxbuf->w - x;
+	if (hh > tfxbuf->h - y)
+		hh = tfxbuf->h - y;
+
+	int sy;
+	struct tb_cell *dst = tfxbuf->buf + tfxbuf->w * y + x;
+	const struct tb_cell *src = other->buf + other->w * yo + xo;
+	size_t size = sizeof(struct tb_cell) * ww;
+
+	for (sy = 0; sy < hh; ++sy) {
+		memcpy(dst, src, size);
+		dst += tfxbuf->w;
+		src += other->w;
+	}
 	
-	if (w > 0 && x + w < tb_width() && h > 0 && y + h < tb_height()) {
-		struct tb_cell c;
-		c.ch = ch;
-		c.fg = fg;
-		c.bg = bg;
-		for (cx = x; cx < x + w; ++cx)
-			for (cy = y; cy < y + h; ++cy)
-				tfxbuf->buf[cy * tfxbuf->w + cx] = c;
-	}
 	return 0;
 }
+
 
 /* tfx_bufWidth
  * 
@@ -605,7 +647,7 @@ static int tfx_bufWidth(lua_State *L)
  * Lua Returns:
  * 	+1	height of buffer
  */
- static int tfx_bufHeight(lua_State *L)
+static int tfx_bufHeight(lua_State *L)
 {
 	maxargs(L, 1);
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
@@ -613,16 +655,28 @@ static int tfx_bufWidth(lua_State *L)
 	return 1;
 }
 
-/* methods for the TfxBuffer userdata
+/* tfx_bufSize
+ * 
+ * returns width and height of the buffer
+ * 
+ * Arguments:
+ * 	L	Lua State
+ * 
+ * Lua Stack:
+ * 	1	TfxBuffer userdata
+ * 
+ * Lua Returns:
+ * 	+1	width of buffer
+ * 	+2	height of buffer
  */
-static const struct luaL_Reg ltfxbuf_methods [] = {
-	{"attributes", tfx_bufAttributes},
-	{"clear", tfx_bufClear},
-	{"setcell", tfx_bufSetcell},
-	{"rect", tfx_bufRect},
-	{"width", tfx_bufWidth},
-	{"height", tfx_bufHeight},
-};
+static int tfx_bufSize(lua_State *L)
+{
+	maxargs(L, 1);
+	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
+	lua_pushinteger(L, tfxbuf->w);
+	lua_pushinteger(L, tfxbuf->h);
+	return 2;
+}
 
 /*** termfx stuff ***/
 
@@ -737,6 +791,34 @@ static int tfx_height(lua_State *L)
 	return 1;
 }
 
+/* tfx_size
+ * 
+ * returns width and height of terminal
+ * 
+ * Arguments:
+ * 	L	Lua State
+ * 
+ * Lua Stack:
+ * 	-
+ * 
+ * Lua Returns:
+ * 	+1	width of terminal, or nil if the terminal is not initialized.
+ * 	+2	height of terminal, or nil if the terminal is not initialized.
+ */
+static int tfx_size(lua_State *L)
+{
+	maxargs(L, 0);
+	int w = tb_width(), h = tb_height();
+	if (w >= 0) {
+		lua_pushinteger(L, w);
+		lua_pushinteger(L, h);
+	} else {
+		lua_pushnil(L);
+		lua_pushnil(L);
+	}
+	return 2;
+}
+
 /* tfx_attributes
  * 
  * sets and gets default foreground and background attributes for terminal
@@ -750,12 +832,13 @@ static int tfx_height(lua_State *L)
  * 	2	(opt) background attribute
  * 
  * Lua Returns:
- *	+1	default foreground attribute
- * 	+2	default background attribute
+ *	+1	default foreground attribute, or nothing if terminal is not initialized
+ * 	+2	default background attribute, or nothing if terminal is not initialized
  */
 static int tfx_attributes(lua_State *L)
 {
 	maxargs(L, 2);
+	if (!initialized) return 0;
 	if (lua_gettop(L) > 0) {
 		default_fg = (uint16_t) luaL_checkinteger(L, 1) & 0xFFFF;
 		default_bg = (uint16_t) luaL_checkinteger(L, 2) & 0xFFFF;
@@ -828,8 +911,8 @@ static int tfx_present(lua_State *L)
 static int tfx_setCursor(lua_State *L)
 {
 	maxargs(L, 2);
-	uint16_t x = (uint16_t) luaL_checkinteger(L, 1) - top_left_coord;
-	uint16_t y = (uint16_t) luaL_checkinteger(L, 2) - top_left_coord;
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
 	if (initialized) tb_set_cursor(x, y);
 	return 0;
 }
@@ -877,8 +960,8 @@ static int tfx_hideCursor(lua_State *L)
  */
 static int tfx_setCell(lua_State *L)
 {
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
 	if (tfx_isCell(L, 3)) {
 		maxargs(L, 3);
 		const TfxCell *tfxcell = tfx_checkCell(L, 3);
@@ -906,14 +989,13 @@ static int tfx_setCell(lua_State *L)
  * 	3	TfxBuffer
  *
  * Lua Returns:
- *	true if the blit succeeded, or false of not (target area was
- * 	(partially) offscreen).
+ *	-
  */
 static int tfx_blit(lua_State *L)
 {
 	maxargs(L, 3);
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
+	int x = (int) luaL_checkinteger(L, 1) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, 2) - top_left_coord;
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 3);
 	if (initialized) tb_blit(x, y, tfxbuf->w, tfxbuf->h, tfxbuf->buf);
 	return 0;
@@ -921,59 +1003,166 @@ static int tfx_blit(lua_State *L)
 
 /* tfx_rect
  *
- * draws a rectangle to the terminal. Either uses the default values for
- * foreground and background, or the values passed on the lua stack.
+ * draws a rectangle. Is used as both the function termfx.rect and the
+ * TfxBuffer rect method, depending on the first argument. Either uses
+ * the default values for foreground and background, or the values passed
+ * on the lua stack.
  * 
  * Arguments:
  *	L	Lua State
  *
  * Lua Stack:
- * 	1	x coordinate of rect
- * 	2	y coordinate of rect
- * 	3	width of rect
- * 	4	height of rect
+ * 	(1	TfxBuffer)
+ * 	+1	x coordinate of rect
+ * 	+2	y coordinate of rect
+ * 	+3	width of rect
+ * 	+4	height of rect
  * either
- * 	5	TfxCell
+ * 	+5	TfxCell
  * or
- * 	5	(opt) char, defaults to ' '
- * 	6	(opt) foreground attributes, defaults to buffer default foreground
- * 	7	(opt) background attributes, defaults to buffer default background
+ * 	+5	(opt) char, defaults to ' '
+ * 	+6	(opt) foreground attributes, defaults to buffer default foreground
+ * 	+7	(opt) background attributes, defaults to buffer default background
  *
  * Lua Returns:
  *	false if the rectangle was entirely outside of the terminal, true if not
  */
 static int tfx_rect(lua_State *L)
 {
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
-	uint32_t w = (uint32_t) luaL_checkinteger(L, 3);
-	uint32_t h = (uint32_t) luaL_checkinteger(L, 4);
+	if (!initialized) return 0;
+	
+	TfxBuffer *tfxbuf = NULL;
+	int fw, fh, start = 1;
+	uint16_t dfg = default_fg, dbg = default_bg;
+	if (tfx_isBuffer(L, 1)) {
+		tfxbuf = tfx_checkBuffer(L, 1);
+		fw = tfxbuf->w;
+		fh = tfxbuf->h;
+		dfg = tfxbuf->fg;
+		dbg = tfxbuf->bg;
+		start = 2;
+	} else {
+		fw = tb_width();
+		fh = tb_height();
+	}
+	
+	int x = (int) luaL_checkinteger(L, start) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, start + 1) - top_left_coord;
+	int w = (int) luaL_checkinteger(L, start + 2);
+	int h = (int) luaL_checkinteger(L, start + 3);
 	uint32_t ch;
 	uint16_t fg, bg;
-	if (tfx_isCell(L, 5)) {
-		maxargs(L, 5);
-		TfxCell *tfxcell = tfx_toCell(L, 5);
+	if (tfx_isCell(L, start + 4)) {
+		maxargs(L, start + 4);
+		TfxCell *tfxcell = tfx_toCell(L, start + 4);
 		ch = tfxcell->ch;
 		fg = tfxcell->fg;
 		bg = tfxcell->bg;
 	} else {
-		maxargs(L, 7);
-		ch = _tfx_optchar(L, 5, 0);
-		fg = (uint16_t) luaL_optinteger(L, 6, default_fg) & 0xFFFF;
-		bg = (uint16_t) luaL_optinteger(L, 7, default_bg) & 0xFFFF;
+		maxargs(L, start + 6);
+		ch = _tfx_optchar(L, start + 4, 0);
+		fg = (uint16_t) luaL_optinteger(L, start + 5, dfg) & 0xFFFF;
+		bg = (uint16_t) luaL_optinteger(L, start + 6, dbg) & 0xFFFF;
 	}
 	int cx, cy;
 	
-	if (!initialized) return 0;
-	
-	if (w > 0 && x + w < tb_width() && h > 0 && y + h < tb_height()) {
+	if (w > 0 && x + w <= fw && h > 0 && y + h <= fh) {
 		struct tb_cell c;
 		c.ch = ch;
 		c.fg = fg;
 		c.bg = bg;
-		for (cx = x; cx < x + w; ++cx)
-			for (cy = y; cy < y + h; ++cy)
-				tb_put_cell(cx, cy, &c);
+		for (cx = x; cx < x + w; ++cx) {
+			for (cy = y; cy < y + h; ++cy) {
+				if (tfxbuf)
+					_tfx_bufChangeCell(tfxbuf, cx, cy, &c);
+				else
+					tb_put_cell(cx, cy, &c);
+			}
+		}
+	}
+	return 0;
+}
+
+/* tfx_printAt
+ *
+ * prints some text to the top left position at x, y. Is used as both the
+ * function termfx.printat and the TfxBuffer printat method, depending on
+ * the first argument. 
+ *
+ * Arguments:
+ *	L	Lua State
+ *
+ * Lua Stack:
+ *  (1	TfxBuffer)
+ *	+1	x coordinate of text
+ * 	+2	y coordinate of text
+ * 	+3	text (string or table of chars)
+ * 	+4	(opt) maximum width to print
+ *
+ * Lua Returns:
+ *	-
+ */
+static int tfx_printAt(lua_State *L)
+{
+	if (!initialized) return 0;
+	
+	TfxBuffer *tfxbuf = NULL;
+	int fw, start = 1;
+	uint16_t dfg = default_fg, dbg = default_bg;
+	if (tfx_isBuffer(L, 1)) {
+		tfxbuf = tfx_checkBuffer(L, 1);
+		fw = tfxbuf->w;
+		dfg = tfxbuf->fg;
+		dbg = tfxbuf->bg;
+		start = 2;
+	} else {
+		fw = tb_width();
+	}
+	
+	int x = (int) luaL_checkinteger(L, start) - top_left_coord;
+	int y = (int) luaL_checkinteger(L, start + 1) - top_left_coord;
+	int pw = -1;
+	if (lua_gettop(L) == start + 3)
+		pw = (int) luaL_checkinteger(L, start + 3);
+	
+	if (lua_type(L, start + 2) == LUA_TTABLE) {
+		int i = 1;
+		int w = 0;
+		if (pw < 0) {
+			pw = lua_rawlen(L, start + 2);
+		}
+		lua_rawgeti(L, start + 2, i);
+		while (!lua_isnil(L, -1) && w < pw && x + w < fw) {
+			TfxCell *c = tfx_toCell(L, -1);
+			if (c) {
+				if (tfxbuf)
+					_tfx_bufChangeCell(tfxbuf, x + w, y, c);
+				else
+					tb_put_cell(x + w, y, c);
+			}
+			++w;
+			++i;
+			lua_rawgeti(L, start + 2, i);
+		}
+	} else if (!lua_isnil(L, start + 2)) {
+		const char* str = luaL_checkstring(L, start + 2);
+		int isutf8 = mini_utf8_check_encoding(str) == 0;
+		int w = 0;
+		if (pw < 0) {
+			pw = isutf8 ? mini_utf8_strlen(str) : strlen(str);
+		}
+		struct tb_cell c;
+		c.fg = dfg;
+		c.bg = dbg;
+		c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+		
+		for (w = 0; c.ch && (w < pw) && (x + w < fw); ++w) {
+			if (tfxbuf)
+				_tfx_bufChangeCell(tfxbuf, x + w, y, &c);
+			else
+				tb_put_cell(x + w, y, &c);
+			c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+		}
 	}
 	return 0;
 }
@@ -1044,7 +1233,8 @@ static int tfx_pollEvent(lua_State *L)
 	maxargs(L, 1);
 	struct tb_event evt;
 	int eno = 0;
-	if (lua_gettop(L) == 1) {
+	int started = _tfx_getMsTimer();
+	if (lua_gettop(L) == 1 && !lua_isnil(L, 1)) {
 		int timeout = (int) luaL_checkinteger(L, 1);
 		eno = initialized ? tb_peek_event(&evt, timeout) : 0;
 	} else
@@ -1059,6 +1249,10 @@ static int tfx_pollEvent(lua_State *L)
 			case TB_EVENT_RESIZE: lua_pushliteral(L, "resize"); break;
 			default: lua_pushliteral(L, "unknown");
 		}
+		lua_rawset(L, -3);
+		
+		lua_pushliteral(L, "elapsed");
+		lua_pushinteger(L, _tfx_getMsTimer() - started);
 		lua_rawset(L, -3);
 		
 		if (evt.type == TB_EVENT_KEY) {
@@ -1096,77 +1290,40 @@ static int tfx_pollEvent(lua_State *L)
 			lua_pushinteger(L, evt.h);
 			lua_rawset(L, -3);
 		}
-	} else
+	} else if (eno == 0) {
 		lua_pushnil(L);
+	} else {
+		lua_pushnil(L);
+		lua_pushstring(L, strerror(errno));
+		return 2;
+	}
 	return 1;
 }
 
-/* tfx_printAt
- *
- * prints some text to the terminal with top left position at x, y
- *
- * Arguments:
- *	L	Lua State
- *
- * Lua Stack:
- *	1	x coordinate of text
- * 	2	y coordinate of text
- * 	3	text (string or table of chars)
- * 	4	(opt) maximum width to print
- *
- * Lua Returns:
- *	-
+/* methods for the TfxBuffer userdata
  */
-static int tfx_printAt(lua_State *L)
-{
-	uint32_t x = (uint32_t) luaL_checkinteger(L, 1) - top_left_coord;
-	uint32_t y = (uint32_t) luaL_checkinteger(L, 2) - top_left_coord;
-	int pw = -1;
-	if (lua_gettop(L) == 4)
-		pw = (int) luaL_checkinteger(L, 4);
+static const struct luaL_Reg ltfxbuf_methods [] = {
+	{"attributes", tfx_bufAttributes},
+	{"clear", tfx_bufClear},
+	{"setcell", tfx_bufSetcell},
+	{"blit", tfx_bufBlit},
+	{"rect", tfx_rect},
+	{"printat", tfx_printAt},
+	{"width", tfx_bufWidth},
+	{"height", tfx_bufHeight},
+	{"size", tfx_bufSize},
 	
-	if (lua_type(L, 3) == LUA_TTABLE) {
-		int i = 1;
-		int w = 0;
-		if (pw < 0) {
-			pw = lua_rawlen(L, 3);
-		}
-		lua_rawgeti(L, 3, i);
-		while (!lua_isnil(L, -1) && w < pw && x + w < tb_width()) {
-			TfxCell *c = tfx_toCell(L, -1);
-			if (c)
-				tb_put_cell(x + w, y, c);
-			++w;
-			++i;
-			lua_rawgeti(L, 3, i);
-		}
-	} else if (!lua_isnil(L, 3)) {
-		const char* str = luaL_checkstring(L, 3);
-		int isutf8 = mini_utf8_check_encoding(str) == 0;
-		int w = 0;
-		if (pw < 0) {
-			pw = isutf8 ? mini_utf8_strlen(str) : strlen(str);
-		}
-		struct tb_cell c;
-		c.fg = default_fg;
-		c.bg = default_bg;
-		c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
-		
-		for (w = 0; c.ch && (w < pw) && (x + w < tb_width()); ++w) {
-			tb_put_cell(x + w, y, &c);
-			c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
-		}
-	}
-	return 0;
-}
+	{NULL, NULL}
+};
 
 /* TermFX function list
  */
-static const struct luaL_Reg ltermbox [] ={
+static const struct luaL_Reg ltermfx [] ={
 	{"init", tfx_init},
 	{"shutdown", tfx_shutdown},
 	{"width", tfx_width},
 	{"height", tfx_height},
+	{"size", tfx_size},
 	{"clear", tfx_clear},
 	{"attributes", tfx_attributes},
 	{"present", tfx_present},
@@ -1356,8 +1513,12 @@ static void tfx_addconstants(lua_State *L)
  */
 int luaopen_termfx(lua_State *L)
 {
-	luaL_newlib(L, ltermbox);
-	
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	mstimer_tm0 = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+
+	luaL_newlib(L, ltermfx);
+	tfx_color_init(L);
 	tfx_addconstants(L);
 
 	lua_pushliteral(L, "_VERSION");
