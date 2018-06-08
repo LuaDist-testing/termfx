@@ -1,5 +1,16 @@
 # CHANGELOG #
 
+## Version 0.6 ##
+
+* changed termfx.attributes() and  and buf:attributes() to have optional
+  arguments, defaulting to the current default attributes. This way you
+  can for example only change the foreground color.
+* "fixed" Makefile to work from luarocks on Mac OS X. The problem was
+  that termbox's waf build system would just compare the contents of $CC
+  to gcc or clang, but when called from luarocks it contains some more
+  stuff... unsetting CC before calling waf configure fixes this.
+* setting cells to chars < ' ' will now set to ' '
+
 ## Version 0.5 ##
 
 * added termfx.rgb2color(), termfx.grey2color() and termfx.colorinfo()

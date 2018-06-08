@@ -251,7 +251,7 @@ static int tfx__newindexCell(lua_State *L)
 	uint32_t val = (uint32_t) luaL_checkinteger(L, 3);
 
 	if (!strcmp(what, "ch"))
-		tfxcell->ch = val;
+		tfxcell->ch = val < ' ' ? ' ' : val;
 	else if (!strcmp(what, "fg"))
 		tfxcell->fg = val;
 	else if (!strcmp(what, "bg"))
@@ -282,7 +282,7 @@ static int tfx_newCell(lua_State *L)
 	uint16_t fg = (uint16_t) luaL_optinteger(L, 2, default_fg) & 0xFFFF;
 	uint16_t bg = (uint16_t) luaL_optinteger(L, 3, default_bg) & 0xFFFF;
 	TfxCell *tfxcell = tfx_pushCell(L);
-	tfxcell->ch = ch;
+	tfxcell->ch = ch < ' ' ? ' ' : ch;
 	tfxcell->fg = fg;
 	tfxcell->bg = bg;
 	return 1;
@@ -448,8 +448,8 @@ static int tfx_bufAttributes(lua_State *L)
 	maxargs(L, 3);
 	TfxBuffer *tfxbuf = tfx_checkBuffer(L, 1);
 	if (lua_gettop(L) > 1) {
-		tfxbuf->fg = (uint16_t) luaL_checkinteger(L, 2) & 0xFFFF;
-		tfxbuf->bg = (uint16_t) luaL_checkinteger(L, 3) & 0xFFFF;
+		tfxbuf->fg = (uint16_t) luaL_optinteger(L, 2, tfxbuf->fg) & 0xFFFF;
+		tfxbuf->bg = (uint16_t) luaL_optinteger(L, 3, tfxbuf->bg) & 0xFFFF;
 	}
 	lua_pushinteger(L, tfxbuf->fg);
 	lua_pushinteger(L, tfxbuf->bg);
@@ -484,7 +484,7 @@ static int tfx_bufClear(lua_State *L)
 		TfxCell *cell = &tfxbuf->buf[c];
 		cell->fg = tfxbuf->fg;
 		cell->bg = tfxbuf->bg;
-		cell->ch = 0;
+		cell->ch = ' ';
 	}
 	return 0;
 }
@@ -546,7 +546,7 @@ static int tfx_bufSetcell(lua_State *L)
 		bg = (uint16_t) luaL_optinteger(L, 6, tfxbuf->bg) & 0xFFFF;
 	}
 	TfxCell cell;
-	cell.ch = ch;
+	cell.ch = ch < '?' ? ' ' : ch;
 	cell.fg = fg;
 	cell.bg = bg;
 	
@@ -840,8 +840,8 @@ static int tfx_attributes(lua_State *L)
 	maxargs(L, 2);
 	if (!initialized) return 0;
 	if (lua_gettop(L) > 0) {
-		default_fg = (uint16_t) luaL_checkinteger(L, 1) & 0xFFFF;
-		default_bg = (uint16_t) luaL_checkinteger(L, 2) & 0xFFFF;
+		default_fg = (uint16_t) luaL_optinteger(L, 1, default_fg) & 0xFFFF;
+		default_bg = (uint16_t) luaL_optinteger(L, 2, default_bg) & 0xFFFF;
 		tb_set_clear_attributes(default_fg, default_bg);
 	}
 	lua_pushinteger(L, default_fg);
@@ -971,6 +971,7 @@ static int tfx_setCell(lua_State *L)
 		uint32_t ch = _tfx_optchar(L, 3, ' ');
 		uint16_t fg = (uint16_t) luaL_optinteger(L, 4, default_fg) & 0xFFFF;
 		uint16_t bg = (uint16_t) luaL_optinteger(L, 5, default_bg) & 0xFFFF;
+		if (ch < ' ') ch = ' ';
 		if (initialized) tb_change_cell(x, y, ch, fg, bg);
 	}
 	return 0;
@@ -1068,7 +1069,7 @@ static int tfx_rect(lua_State *L)
 	
 	if (w > 0 && x + w <= fw && h > 0 && y + h <= fh) {
 		struct tb_cell c;
-		c.ch = ch;
+		c.ch = ch < ' ' ? ' ' : ch;
 		c.fg = fg;
 		c.bg = bg;
 		for (cx = x; cx < x + w; ++cx) {
@@ -1155,6 +1156,7 @@ static int tfx_printAt(lua_State *L)
 		c.fg = dfg;
 		c.bg = dbg;
 		c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+		if (c.ch < ' ' && c.ch > 0) c.ch = ' ';
 		
 		for (w = 0; c.ch && (w < pw) && (x + w < fw); ++w) {
 			if (tfxbuf)
@@ -1162,6 +1164,7 @@ static int tfx_printAt(lua_State *L)
 			else
 				tb_put_cell(x + w, y, &c);
 			c.ch = isutf8 ? mini_utf8_decode(&str) : *str++;
+			if (c.ch < ' ' && c.ch > 0) c.ch = ' ';
 		}
 	}
 	return 0;
@@ -1274,7 +1277,7 @@ static int tfx_pollEvent(lua_State *L)
 			lua_pushliteral(L, "char");
 			char c[10];
 			memset(c, 0, 10);
-			if (evt.ch < 256)
+			if (evt.ch < 0x7F)
 				c[0] = evt.ch;
 			else
 				mini_utf8_encode(evt.ch, c, 10);

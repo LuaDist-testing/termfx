@@ -27,7 +27,7 @@
  * 		returned and *str is not updated. If *str does not point to a
  * 		valid utf8 encoded char, -1 is returned and *str is not updated.
  * 
- * 	int mini_tf8_encode(int cp, const char* str, int len)
+ * 	int mini_utf8_encode(int cp, const char* str, int len)
  * 		encodes the codepoint cp into an utf8 byte sequence and stores
  * 		that into str, where len bytes are available. If that went without
  * 		errors, the length of the encoded sequence is returned. If cp is
@@ -209,8 +209,8 @@ static inline int mini_utf8_decode(const char **str)
 	return ret;
 }
 
-/* validity check from
- * https://community.oracle.com/thread/1627928?start=0&tstart=0
+/* only utf16 surrogate pairs (0xD800-0xDFFF) are invalid unicode
+ * codepoints
  */
 static inline int mini_utf8_encode(int cp, char *str, int len)
 {
@@ -224,7 +224,7 @@ static inline int mini_utf8_encode(int cp, char *str, int len)
 		*s++ = (cp >> 6) | 0xC0;
 		*s = (cp & 0x3F) | 0x80;
 		return 2;
-	} else if (cp <= 0xFFFD) {
+	} else if (cp <= 0xFFFF) {
 		if (0xD800 <= cp && cp <= 0xDFFF) return -1;
 		if (len < 3) return 0;
 		*s++ = (cp >> 12) | 0xE0;
@@ -232,7 +232,6 @@ static inline int mini_utf8_encode(int cp, char *str, int len)
 		*s = (cp & 0x3F) | 0x80;
 		return 3;
 	} else if (cp <= 0x10FFFF) {
-		if (cp < 0x10000) return -1;
 		if (len < 4) return 0;
 		*s++ =(cp >> 18) | 0xF0;
 		*s++ =((cp >> 12) & 0x3F) | 0x80;

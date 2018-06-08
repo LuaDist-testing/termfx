@@ -61,6 +61,7 @@ libtermbox.a: $(TERMBOX)/build/src/libtermbox.a
 
 $(TERMBOX)/build/src/libtermbox.a: $(TERMBOX)
 	(cd $(TERMBOX); \
+	unset CC; \
 	./waf configure $(WAFFLAGS); \
 	./waf build --targets=termbox_static -v )
 

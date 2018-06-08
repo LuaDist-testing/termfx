@@ -6,7 +6,7 @@
  * Released under MIT/X11 license. See file LICENSE for details.
  */
 
-#define _VERSION "0.5"
+#define _VERSION "0.6"
 
 #define TFXCELL "TfxCell"
 #define TFXBUFFER "TfxBuffer"
