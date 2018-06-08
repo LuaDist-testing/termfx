@@ -1,5 +1,10 @@
 # CHANGELOG #
 
+## Version 0.7.1 ##
+
+* proper tostring methods for the userdatas
+* added a fix to the make build to compile the termbox files with -fPIC
+
 ## Version 0.7 ##
 
 * added mouse support from newer versions of termbox

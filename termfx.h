@@ -6,7 +6,7 @@
  * Released under the terms of the MIT license. See file LICENSE for details.
  */
 
-#define _VERSION "0.7"
+#define _VERSION "0.7.1"
 
 #define TFXCELL "TfxCell"
 #define TFXBUFFER "TfxBuffer"

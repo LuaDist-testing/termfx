@@ -92,7 +92,7 @@ extern "C" {
 #define TB_KEY_CTRL_UNDERSCORE  0x1F /* clash with 'CTRL_7' */
 #define TB_KEY_SPACE            0x20
 #define TB_KEY_BACKSPACE2       0x7F
-#define TB_KEY_CTRL_8           0x7F /* clash with 'DELETE' */
+#define TB_KEY_CTRL_8           0x7F /* clash with 'BACKSPACE2' */
 
 /* These are non-existing ones.
  *
@@ -101,10 +101,12 @@ extern "C" {
  * #define TB_KEY_CTRL_0 clash with '0'
  */
 
-/* Currently there is only one modifier. See also struct tb_event's mod
- * field.
+/*
+ * Alt modifier constant, see tb_event.mod field and tb_select_input_mode function.
+ * Mouse-motion modifier
  */
-#define TB_MOD_ALT 0x01
+#define TB_MOD_ALT    0x01
+#define TB_MOD_MOTION 0x02
 
 /* Colors (see struct tb_cell's fg and bg fields). */
 #define TB_DEFAULT 0x00
@@ -142,16 +144,18 @@ struct tb_cell {
 #define TB_EVENT_RESIZE 2
 #define TB_EVENT_MOUSE  3
 
-/* This struct represents a termbox event. The 'mod', 'key' and 'ch' fields are
+/* An event, single interaction from the user. The 'mod' and 'ch' fields are
  * valid if 'type' is TB_EVENT_KEY. The 'w' and 'h' fields are valid if 'type'
  * is TB_EVENT_RESIZE. The 'x' and 'y' fields are valid if 'type' is
- * TB_EVENT_MOUSE.
+ * TB_EVENT_MOUSE. The 'key' field is valid if 'type' is either TB_EVENT_KEY
+ * or TB_EVENT_MOUSE. The fields 'key' and 'ch' are mutually exclusive; only
+ * one of them can be non-zero at a time.
  */
 struct tb_event {
 	uint8_t type;
-	uint8_t mod;
-	uint16_t key;
-	uint32_t ch;
+	uint8_t mod; /* modifiers to either 'key' or 'ch' below */
+	uint16_t key; /* one of the TB_KEY_* constants */
+	uint32_t ch; /* unicode character */
 	int32_t w;
 	int32_t h;
 	int32_t x;
@@ -168,10 +172,13 @@ struct tb_event {
 #define TB_EPIPE_TRAP_ERROR      -3
 
 /* Initializes the termbox library. This function should be called before any
- * other functions. After successful initialization, the library must be
+ * other functions. Function tb_init is same as tb_init_file("/dev/tty").
+ * After successful initialization, the library must be
  * finalized using the tb_shutdown() function.
  */
 SO_IMPORT int tb_init(void);
+SO_IMPORT int tb_init_file(const char* name);
+SO_IMPORT int tb_init_fd(int inout);
 SO_IMPORT void tb_shutdown(void);
 
 /* Returns the size of the internal back buffer (which is the same as
@@ -219,7 +226,7 @@ SO_IMPORT void tb_blit(int x, int y, int w, int h, const struct tb_cell *cells);
  * as no tb_clear() and tb_present() calls are made. The buffer is
  * one-dimensional buffer containing lines of cells starting from the top.
  */
-SO_IMPORT struct tb_cell *tb_cell_buffer();
+SO_IMPORT struct tb_cell *tb_cell_buffer(void);
 
 #define TB_INPUT_CURRENT 0 /* 000 */
 #define TB_INPUT_ESC     1 /* 001 */
@@ -234,7 +241,15 @@ SO_IMPORT struct tb_cell *tb_cell_buffer();
  *    When ESC sequence is in the buffer and it doesn't match any known
  *    sequence => ESC enables TB_MOD_ALT modifier for the next keyboard event.
  *
+ * You can also apply TB_INPUT_MOUSE via bitwise OR operation to either of the
+ * modes (e.g. TB_INPUT_ESC | TB_INPUT_MOUSE). If none of the main two modes
+ * were set, but the mouse mode was, TB_INPUT_ESC mode is used. If for some
+ * reason you've decided to use (TB_INPUT_ESC | TB_INPUT_ALT) combination, it
+ * will behave as if only TB_INPUT_ESC was selected.
+ *
  * If 'mode' is TB_INPUT_CURRENT, it returns the current input mode.
+ *
+ * Default termbox input mode is TB_INPUT_ESC.
  */
 SO_IMPORT int tb_select_input_mode(int mode);
 
@@ -265,17 +280,19 @@ SO_IMPORT int tb_select_input_mode(int mode);
  *        tb_change_cell(x, y, '@', 184, 240);
  *        tb_change_cell(x, y, '@', 0xb8, 0xf0);
  *
- * 2. TB_OUTPUT_216        => [0..216]
+ * 3. TB_OUTPUT_216        => [0..216]
  *    This mode supports the 3rd range of the 256 mode only.
  *    But you don't need to provide an offset.
  *
- * 3. TB_OUTPUT_GRAYSCALE  => [0..23]
+ * 4. TB_OUTPUT_GRAYSCALE  => [0..23]
  *    This mode supports the 4th range of the 256 mode only.
  *    But you dont need to provide an offset.
  *
  * Execute build/src/demo/output to see its impact on your terminal.
  *
  * If 'mode' is TB_OUTPUT_CURRENT, it returns the current output mode.
+ *
+ * Default termbox output mode is TB_OUTPUT_NORMAL.
  */
 SO_IMPORT int tb_select_output_mode(int mode);
 

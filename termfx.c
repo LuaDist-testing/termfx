@@ -94,10 +94,10 @@ static int _tfx_isUserdataOfType(lua_State *L, int index, const char* type)
 }
 
 /* helper: return a millisecond timer, which is 0 at the load time of
- * the library, so that the result will fit into an int for some time (a
- * little more than 49 days)
+ * the library, so that the result will fit into an uint32_t for some time
+ * (a little more than 49 days)
  */
-static int _tfx_getMsTimer(void)
+static uint32_t _tfx_getMsTimer(void)
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -106,7 +106,7 @@ static int _tfx_getMsTimer(void)
 		mstimer_tm0 += INT_MAX;
 		tm -= INT_MAX;
 	}
-	return (int) tm;
+	return (uint32_t) tm;
 }
 
 /*** TfxCell Userdata handling ***/
@@ -187,13 +187,7 @@ static TfxCell* tfx_pushCell(lua_State *L)
 static int tfx__tostringCell(lua_State *L)
 {
 	TfxCell *tfxcell = (TfxCell*) lua_touserdata(L, 1);
-	char buf[TOSTRING_BUFSIZ];
-	/* length of type name + length of hex pointer rep + '0x' + ' ()' + '\0' */
-	if (strlen(TFXCELL) + (sizeof(void*) * 2) + 2 + 4 > TOSTRING_BUFSIZ)
-		return luaL_error(L, "Whoopsie... the string representation seems to be too long.");
-		/* this should not happen, just to be sure! */
-	sprintf(buf, "%s (%p)", TFXCELL, tfxcell);
-	lua_pushstring(L, buf);
+	lua_pushfstring(L, "%s (%p)", TFXCELL, tfxcell);
 	return 1;
 }
 
@@ -380,13 +374,7 @@ static int tfx__gcBuffer(lua_State *L)
 static int tfx__tostringBuffer(lua_State *L)
 {
 	TfxBuffer *tfxbuf = (TfxBuffer*) lua_touserdata(L, 1);
-	char buf[TOSTRING_BUFSIZ];
-	/* length of type name + length of hex pointer rep + '0x' + ' ()' + '\0' */
-	if (strlen(TFXBUFFER) + (sizeof(void*) * 2) + 2 + 4 > TOSTRING_BUFSIZ)
-		return luaL_error(L, "Whoopsie... the string representation seems to be too long.");
-		/* this should not happen, just to be sure! */
-	sprintf(buf, "%s (%p)", TFXBUFFER, tfxbuf);
-	lua_pushstring(L, buf);
+	lua_pushfstring(L, "%s (%p)", TFXBUFFER, tfxbuf);
 	return 1;
 }
 
@@ -1455,9 +1443,9 @@ static int tfx_pollEvent(lua_State *L)
 	maxargs(L, 1);
 	struct tb_event evt;
 	int eno = 0;
-	int started = _tfx_getMsTimer();
+	uint32_t started = _tfx_getMsTimer();
 	if (lua_gettop(L) == 1 && !lua_isnil(L, 1)) {
-		int timeout = (int) luaL_checkinteger(L, 1);
+		uint32_t timeout = (int) luaL_checkinteger(L, 1);
 		eno = initialized ? tb_peek_event(&evt, timeout) : 0;
 	} else
 		eno = initialized ? tb_poll_event(&evt) : 0;

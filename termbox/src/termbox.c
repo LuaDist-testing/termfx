@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <sys/select.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -54,8 +55,6 @@ static uint16_t background = TB_DEFAULT;
 static uint16_t foreground = TB_DEFAULT;
 
 static void write_cursor(int x, int y);
-static void write_sgr_fg(uint16_t fg);
-static void write_sgr_bg(uint16_t bg);
 static void write_sgr(uint16_t fg, uint16_t bg);
 
 static void cellbuf_init(struct cellbuf *buf, int width, int height);
@@ -76,9 +75,9 @@ static volatile int buffer_size_change_request;
 
 /* -------------------------------------------------------- */
 
-int tb_init(void)
+int tb_init_fd(int inout_)
 {
-	inout = open("/dev/tty", O_RDWR);
+	inout = inout_;
 	if (inout == -1) {
 		return TB_EFAILED_TO_OPEN_TTY;
 	}
@@ -129,6 +128,15 @@ int tb_init(void)
 	cellbuf_clear(&front_buffer);
 
 	return 0;
+}
+
+int tb_init_file(const char* name){
+	return tb_init_fd(open(name, O_RDWR));
+}
+
+int tb_init(void)
+{
+	return tb_init_file("/dev/tty");
 }
 
 void tb_shutdown(void)
@@ -270,7 +278,7 @@ void tb_blit(int x, int y, int w, int h, const struct tb_cell *cells)
 	}
 }
 
-struct tb_cell *tb_cell_buffer()
+struct tb_cell *tb_cell_buffer(void)
 {
 	return back_buffer.cells;
 }
@@ -310,6 +318,14 @@ void tb_clear(void)
 int tb_select_input_mode(int mode)
 {
 	if (mode) {
+		if ((mode & (TB_INPUT_ESC | TB_INPUT_ALT)) == 0)
+			mode |= TB_INPUT_ESC;
+
+		/* technically termbox can handle that, but let's be nice and show here
+		   what mode is actually used */
+		if ((mode & (TB_INPUT_ESC | TB_INPUT_ALT)) == (TB_INPUT_ESC | TB_INPUT_ALT))
+			mode &= ~TB_INPUT_ALT;
+
 		inputmode = mode;
 		if (mode&TB_INPUT_MOUSE) {
 			bytebuffer_puts(&output_buffer, funcs[T_ENTER_MOUSE]);
@@ -364,45 +380,46 @@ static void write_cursor(int x, int y) {
 	WRITE_LITERAL("H");
 }
 
-// can only be called in NORMAL output mode
-static void write_sgr_fg(uint16_t fg) {
-	char buf[32];
-
-	WRITE_LITERAL("\033[3");
-	WRITE_INT(fg-1);
-	WRITE_LITERAL("m");
-}
-
-// can only be called in NORMAL output mode
-static void write_sgr_bg(uint16_t bg) {
-	char buf[32];
-
-	WRITE_LITERAL("\033[4");
-	WRITE_INT(bg-1);
-	WRITE_LITERAL("m");
-}
-
 static void write_sgr(uint16_t fg, uint16_t bg) {
 	char buf[32];
+
+	if (fg == TB_DEFAULT && bg == TB_DEFAULT)
+		return;
 
 	switch (outputmode) {
 	case TB_OUTPUT_256:
 	case TB_OUTPUT_216:
 	case TB_OUTPUT_GRAYSCALE:
-		WRITE_LITERAL("\033[38;5;");
-		WRITE_INT(fg);
-		WRITE_LITERAL("m");
-		WRITE_LITERAL("\033[48;5;");
-		WRITE_INT(bg);
+		WRITE_LITERAL("\033[");
+		if (fg != TB_DEFAULT) {
+			WRITE_LITERAL("38;5;");
+			WRITE_INT(fg);
+			if (bg != TB_DEFAULT) {
+				WRITE_LITERAL(";");
+			}
+		}
+		if (bg != TB_DEFAULT) {
+			WRITE_LITERAL("48;5;");
+			WRITE_INT(bg);
+		}
 		WRITE_LITERAL("m");
 		break;
 	case TB_OUTPUT_NORMAL:
 	default:
-		WRITE_LITERAL("\033[3");
-		WRITE_INT(fg-1);
-		WRITE_LITERAL(";4");
-		WRITE_INT(bg-1);
+		WRITE_LITERAL("\033[");
+		if (fg != TB_DEFAULT) {
+			WRITE_LITERAL("3");
+			WRITE_INT(fg - 1);
+			if (bg != TB_DEFAULT) {
+				WRITE_LITERAL(";");
+			}
+		}
+		if (bg != TB_DEFAULT) {
+			WRITE_LITERAL("4");
+			WRITE_INT(bg - 1);
+		}
 		WRITE_LITERAL("m");
+		break;
 	}
 }
 
@@ -523,24 +540,7 @@ static void send_attr(uint16_t fg, uint16_t bg)
 		if ((fg & TB_REVERSE) || (bg & TB_REVERSE))
 			bytebuffer_puts(&output_buffer, funcs[T_REVERSE]);
 
-		switch (outputmode) {
-		case TB_OUTPUT_256:
-		case TB_OUTPUT_216:
-		case TB_OUTPUT_GRAYSCALE:
-			write_sgr(fgcol, bgcol);
-			break;
-
-		case TB_OUTPUT_NORMAL:
-		default:
-			if (fgcol != TB_DEFAULT) {
-				if (bgcol != TB_DEFAULT)
-					write_sgr(fgcol, bgcol);
-				else
-					write_sgr_fg(fgcol);
-			} else if (bgcol != TB_DEFAULT) {
-				write_sgr_bg(bgcol);
-			}
-		}
+		write_sgr(fgcol, bgcol);
 
 		lastfg = fg;
 		lastbg = bg;
@@ -551,12 +551,11 @@ static void send_char(int x, int y, uint32_t c)
 {
 	char buf[7];
 	int bw = tb_utf8_unicode_to_char(buf, c);
-	buf[bw] = '\0';
 	if (x-1 != lastx || y != lasty)
 		write_cursor(x, y);
 	lastx = x; lasty = y;
 	if(!c) buf[0] = ' '; // replace 0 with whitespace
-	bytebuffer_puts(&output_buffer, buf);
+	bytebuffer_append(&output_buffer, buf, bw);
 }
 
 static void send_clear(void)

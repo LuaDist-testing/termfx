@@ -62,7 +62,7 @@ libtermbox.a: $(TERMBOX)/build/src/libtermbox.a
 $(TERMBOX)/build/src/libtermbox.a: $(TERMBOX)
 	(cd $(TERMBOX); \
 	unset CC; \
-	./waf configure $(WAFFLAGS); \
+	env CFLAGS="-fPIC" ./waf configure $(WAFFLAGS); \
 	./waf build --targets=termbox_static -v )
 
 $(TERMBOX)/src/termbox.h: $(TERMBOX)
@@ -82,6 +82,9 @@ clean:
 
 distclean: clean
 	rm -rf $(TERMBOX)
+
+check:
+	cppcheck *.c
 
 dist: $(TERMBOX) clean
 	cd $(TERMBOX) && rm -rf .git .gitignore

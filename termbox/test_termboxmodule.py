@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 
 import termbox
@@ -88,9 +88,12 @@ def draw_bottom_line(t, i):
 	w = t.width()
 	h = t.height()
 	c = i
+	palette = [termbox.DEFAULT, termbox.BLACK, termbox.RED, termbox.GREEN,
+	           termbox.YELLOW, termbox.BLUE, termbox.MAGENTA, termbox.CYAN,
+	           termbox.WHITE]
 	for x in range(w):
-		t.change_cell(x, h-1, ord(u' '), termbox.BLACK, c)
-		t.change_cell(x, h-2, ord(u' '), termbox.BLACK, c)
+		t.change_cell(x, h-1, ord(u' '), termbox.BLACK, palette[c])
+		t.change_cell(x, h-2, ord(u' '), termbox.BLACK, palette[c])
 		c += 1
 		if c > 7:
 			c = 0
@@ -105,7 +108,7 @@ with termbox.Termbox() as t:
 	while run_app:
 		event_here = t.poll_event()
 		while event_here:
-			(type, ch, key, mod, w, h) = event_here
+			(type, ch, key, mod, w, h, x, y) = event_here
 			if type == termbox.EVENT_KEY and key == termbox.KEY_ESC:
 				run_app = False
 			if type == termbox.EVENT_KEY:
